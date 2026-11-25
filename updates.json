@@ -1,0 +1,19 @@
+{
+  "addons": {
+    "zotero-quickswitcher@local": {
+      "updates": [
+        {
+          "version": "0.2.6",
+          "update_link": "https://github.com/pasiooooo/zotero-quickSwitcher/releases/download/v0.2.6/zotero-quickswitcher-0.2.6.xpi",
+          "update_hash": "sha256:eddcd585123162d9187ed2c46731a4404d28171235046b058fe1534d89e9f211",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "10.0.7",
+              "strict_max_version": "10.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

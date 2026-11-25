@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>PDF 预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; color: #777; font: 12px system-ui; }
+    #page { display: block; width: 100%; height: auto; background: white; border: 1px solid #ddd; }
+    nav { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 34px; }
+    button { display: flex; border: 0; border-radius: 4px; padding: 4px; color: inherit; background: transparent; cursor: pointer; }
+    button:hover { background: rgb(127 127 127 / 12%); }
+    button:focus-visible { outline: 2px solid #777; }
+    button:disabled { opacity: .35; cursor: default; }
+    svg { width: 16px; height: 16px; }
+  </style>
+  <script type="module">
+    const session = new URL(location.href).searchParams.get("session");
+    import(`./pdf-preview.js?session=${encodeURIComponent(session)}`).catch(() => parent.postMessage({ channel: "quickswitcher-pdf", session, type: "error", message: "PDF 组件未能加载" }, "*"));
+  </script>
+</head>
+<body>
+  <canvas id="page" role="img" aria-label="PDF 页面" tabindex="0"></canvas>
+  <nav aria-label="PDF 翻页">
+    <button id="previous" type="button" title="上一页" aria-label="上一页" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
+    <span id="page-number" aria-live="polite"></span>
+    <button id="next" type="button" title="下一页" aria-label="下一页" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button>
+  </nav>
+</body>
+</html>

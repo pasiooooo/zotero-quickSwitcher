@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.build/
+.work/
+output/
+.env
+.env.*
+*.log
+*.sqlite*
+*.xpi
+*.zip
+__pycache__/
+.DS_Store
+Thumbs.db
