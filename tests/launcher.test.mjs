@@ -256,6 +256,7 @@ function uiPopup() {
   view.doc = doc;
   view.input.setAttribute = () => {}; view.input.removeAttribute = () => {};
   for (const key of ["filterSummary", "copyButton", "scopeChip", "modeIcon", "list", "preview", "previewButton", "sourceButton", "advancedButton", "showAll", "save", "hint", "status"]) view[key] = new UINode(doc, "html");
+  Object.assign(view.list, { clientHeight: 640, scrollTop: 0 });
   view.expressionAdvanced = view.advancedButton;
   view.preview.hidden = true; view.currentSpec = { text: "" }; view.scopePathRevision = 0; return view;
 }
@@ -274,7 +275,7 @@ function collectionPopup(t, { fail } = {}) {
   view.openRevision = view.revision = 1; view.inputShell = { dataset: {} };
   view.root = new UINode(view.doc, "html"); view.root.hidden = false;
   view.body = new UINode(view.doc, "html"); view.dialog = new UINode(view.doc, "html");
-  view.win = { clearTimeout() {} }; view.updatePreview = async () => {}; view.resizeToContent = view.fillOutlineViewport = () => {};
+  view.win = { clearTimeout() {} }; view.updatePreview = async () => {}; view.resizeToContent = () => {};
   view.app.prefs.set = (key, value) => savedPrefs.set(key, value); view.app.logError = () => {};
   view.app.directoryStart = async () => ({ kind: "collection", libraryID: 7, key: "COREAlpha" });
   const directory = (collectionID, parent, libraryID = 7, kind = "collection") => ({ kind, collectionID, libraryID, key: `CORE${parent}`,
@@ -662,18 +663,18 @@ test("macOS Command copy chords use the native citation and bibliography keys", 
   } finally { globalThis.Zotero = previous; }
 });
 
-test("an unfinished candidate preview cannot block a new query and limit changes reset its first page", async () => {
-  const view = uiPopup(), previousZotero = globalThis.Zotero; let release, previews = 0, limit = 20;
+test("an unfinished preview does not block the next query or determine its page size", async () => {
+  const view = uiPopup(), previousZotero = globalThis.Zotero; let release, previews = 0;
   globalThis.Zotero = { Libraries: { get: () => ({ name: "Library" }) } };
   view.input.value = "@First"; view.preview.hidden = false; view.rowNodes = []; view.revision = 0;
-  view.app.prefs.get = key => key === "limit" ? limit : key === "defaultScope" ? "library" : undefined;
+  view.app.prefs.get = key => key === "limit" ? 5 : key === "defaultScope" ? "library" : undefined;
   view.app.search = { authorRows: async pattern => Array.from({ length: 25 }, (_, index) => ({ kind: "author", key: pattern + index, title: pattern + index, records: [{ libraryID: 7 }] })) };
   view.renderRows = () => view.select(0, false); view.renderFilterSummary = () => {};
   view.updatePreview = () => { previews++; return new Promise(resolve => { release = resolve; }); };
   try {
     await view.run(); assert.equal(view.running, false); assert.equal(previews, 1); assert.equal(view.rows.length, 20);
     view.input.value = "@Next"; view.revision++; await view.run(); assert.match(view.rows[0].title, /^Next/u); assert.equal(previews, 2);
-    limit = 5; view.revision++; await view.run(); assert.equal(view.rows.length, 5); assert.equal(view.pickerVisible, 5);
+    view.list.clientHeight = 256; view.input.value = "@Third"; view.revision++; await view.run(); assert.equal(view.rows.length, 8); assert.equal(view.pickerVisible, 8);
   } finally { release?.(); globalThis.Zotero = previousZotero; }
 });
 
@@ -724,14 +725,14 @@ test("outline switch filtering hides inherited descendants and skips context row
     { ...outlineRows()[1], outlineKey: "1", parentKey: null, title: "Other", depth: 0, parents: [] },
     { ...outlineRows()[1], outlineKey: "1.0", parentKey: "1", title: "Methods again", depth: 1, parents: ["Other"] },
   ];
-  const view = outlinePopup(rows); view.switchMode = "outline"; view.input.value = "Methods"; view.list.clientHeight = 32;
-  view.app.prefs.get = name => name === "limit" ? 20 : undefined;
+  const view = outlinePopup(rows); view.switchMode = "outline"; view.input.value = "Methods";
   view.app.outline = { search: async () => ({ rows, allRows: rows, total: rows.length, pending: false }) };
   await view.run();
   assert.deepEqual(view.rows.map(row => row.title), ["Introduction", "Methods", "Other", "Methods again"]);
   assert.deepEqual(view.rows.map(row => !!row.contextOnly), [true, false, true, false]);
   assert.equal(view.rowNodes[0].getAttribute("aria-disabled"), "true");
   assert.equal(view.rows[view.selected].title, "Methods");
+  view.list.clientHeight = 32;
   const key = (key, extra = {}) => view.keydown({ key, target: view.input, preventDefault() {}, ...extra });
   key("ArrowDown", { shiftKey: true }); assert.equal(view.rows[view.selected].title, "Methods again");
   assert.deepEqual(view.chosenRows().map(row => row.title), ["Methods", "Methods again"]);
@@ -790,7 +791,7 @@ function pagingPopup({ grouped = false, count = 24 } = {}) {
     attachmentID: index < 12 ? 1 : 2, outlineKey: String(index < 12 ? index : index - 12), parentKey: null, depth: 0, parents: [], title: `Heading ${index + 1}`,
     pageIndex: index % 3, location: { pageIndex: index % 3 }, documentTitle: index < 12 ? "A" : "B" }));
   view.inputMode = view.mode = "outline"; view.outlineContext = { type: grouped ? "all" : "pdf", attachmentID: 1 }; view.revision = 1;
-  view.app.prefs.get = name => ({ limit: 5, defaultScope: "all" })[name];
+  view.list.clientHeight = 160; view.app.prefs.get = name => name === "defaultScope" ? "all" : undefined;
   let calls = 0;
   view.app.outline = { search: async () => { calls++; return { rows, allRows: rows, total: rows.length, pending: false }; } };
   view.app.makeSpec = (_, spec) => spec; view.spec = () => ({ text: view.input.value, rawText: view.input.value, scope: { type: "all" } });
@@ -804,13 +805,14 @@ test("opening a long outline fills the viewport and growing it preserves selecti
   Object.defineProperty(view.list, "scrollHeight", { get: () => Math.max(view.list.clientHeight,
     view.rowNodes.reduce((height, node, index) => height + (index % 3 ? 32 : 60), 0)) });
   await view.run();
-  assert.equal(view.outlineVisible, 20); assert.ok(view.list.scrollHeight > view.list.clientHeight);
+  const first = view.outlineVisible;
+  assert.ok(first < 40 && view.list.scrollHeight >= view.list.clientHeight);
   assert.equal(view.rows[view.selected].outlineKey, "3"); assert.equal(view.searchCalls(), 1);
-  assert.equal(view.lastMessage, "当前 PDF 大纲 · 20/40 个匹配");
+  assert.equal(view.lastMessage, `当前 PDF 大纲 · ${first}/40 个匹配`);
   view.select(7, false); view.list.scrollTop = 64;
   const selected = view.rows[view.selected]; view.toggleSelection();
-  view.list.clientHeight = 1000; view.fillOutlineViewport();
-  assert.equal(view.outlineVisible, 25); assert.ok(view.list.scrollHeight > view.list.clientHeight);
+  view.list.clientHeight = 1000; view.fillViewport();
+  assert.ok(view.outlineVisible > first && view.list.scrollHeight > view.list.clientHeight);
   assert.equal(view.rows[view.selected].outlineKey, selected.outlineKey); assert.equal(view.list.scrollTop, 64);
   assert.deepEqual(view.chosenRows().map(row => row.outlineKey), [selected.outlineKey]); assert.equal(view.searchCalls(), 1);
 });
@@ -820,7 +822,7 @@ test("outline viewport filling stops for complete, already full, hidden and comp
     const { view } = pagingPopup({ count: options.count });
     await view.run(); view.list.clientHeight = options.height; view.composing = !!options.composing;
     Object.defineProperty(view.list, "scrollHeight", { get: () => Math.max(view.list.clientHeight, view.rowNodes.length * 32) });
-    view.fillOutlineViewport();
+    view.fillViewport();
     assert.equal(view.rows.length, Math.min(5, options.count)); assert.equal(view.searchCalls(), 1);
   }
 });
@@ -924,7 +926,7 @@ test("Ctrl/Cmd path clicks locate the chosen direct membership including a paren
 
 test("path filters use configured prefixes, distinguish same-name branches and suppress repeated clicks", () => {
   const view = uiPopup(), container = new UINode(view.doc, "html"), get = view.app.prefs.get;
-  view.app.prefs.get = name => name === "directoryPrefix" ? "#" : get(name);
+  view.app.prefs.get = name => name === "directoryPrefix" ? "#" : name === "tagPrefix" ? "~" : get(name);
   view.input.value = '>fault @"Ada" OR -:"2020" ';
   const locations = ["A", "B"].map((parent, index) => ({ libraryID: 7, collectionID: index + 1,
     pathSegments: ["Library", parent, "Core"], pathKeys: ["u", parent, String(index)], path: `Library › ${parent} › Core` }));
@@ -999,9 +1001,9 @@ test("library path clicks preserve unbound filters and distinguish libraries wit
 });
 
 test("row repaints beneath a stationary pointer preserve the keyboard selection while pointer movement selects", () => {
-  for (const mode of ["items", "tabs", "directories", "authors", "years", "venues", "types"]) {
+  for (const mode of ["items", "tabs", "directories", "authors", "years", "venues", "types", "tags"]) {
     const view = uiPopup(); view.mode = mode; view.inputMode = mode; view.resizeToContent = () => {};
-    const kind = mode === "directories" ? "collection" : mode === "authors" ? "author" : mode === "years" ? "year" : mode === "venues" ? "venue" : mode === "types" ? "type" : mode === "tabs" ? "tab" : "item";
+    const kind = mode === "directories" ? "collection" : mode === "authors" ? "author" : mode === "years" ? "year" : mode === "venues" ? "venue" : mode === "types" ? "type" : mode === "tags" ? "tag" : mode === "tabs" ? "tab" : "item";
     view.rows = ["First", "Second"].map((title, index) => ({ kind, title, key: kind === "type" ? "journalArticle" : String(index), libraryID: 7, path: `Library › ${title}`, pathSegments: ["Library", title], pathKeys: ["u", String(index)], count: 1 }));
     view.selected = 1; view.select = index => { view.selected = index; };
     view.renderRows(0);
@@ -1395,7 +1397,7 @@ test("guide candidates page in on demand, keep the selection and stop at the end
   const all = Array.from({ length: 45 }, (_, index) => ({ kind: "author", key: `a${index}`, title: `Author ${index}` }));
   const rendered = [], view = Object.create(Launcher.prototype);
   Object.assign(view, { isOpen: true, ready: true, composing: false, mode: "authors", pickerRows: all, rows: all.slice(0, 20), selected: 19, revision: 1, countLabel: "authors",
-    list: { scrollTop: 300 }, rowNodes: [], doc: { activeElement: null }, app: { prefs: { get: name => name === "limit" ? 20 : undefined } },
+    list: { clientHeight: 640, scrollTop: 300 }, rowNodes: [], doc: { activeElement: null },
     renderRows(revision, previous) { rendered.push([this.rows.length, previous.key]); }, select(index) { this.selected = index; }, message(text) { this.status = text; } });
   assert.equal(view.more(), true);
   assert.deepEqual([view.rows.length, view.selected, view.list.scrollTop, view.status], [40, 19, 300, "authors · 45 / 40"]);
@@ -1409,7 +1411,7 @@ test("item pages append one batch with its evidence and preserve the existing se
   globalThis.Zotero = { Items: { getAsync: async itemID => ({ id: itemID }) } };
   const view = Object.create(Launcher.prototype), appended = [], ids = [1, 2, 3, 4, 5];
   Object.assign(view, { isOpen: true, ready: true, mode: "items", revision: 1, openRevision: 1, rows: [{ itemID: 1 }, { itemID: 2 }], selected: 1,
-    pagedItemIDs: ids, currentSpec: { text: "fault" }, list: { scrollTop: 100 }, countLabel: "items",
+    pagedItemIDs: ids, currentSpec: { text: "fault" }, list: { clientHeight: 64, scrollTop: 100 }, countLabel: "items",
     app: { prefs: { get: () => 2 }, search: { metadataCache: new Map(ids.map(id => [id, { title: "fault" }])),
       result: async item => ({ itemID: item.id }), metadataEvidence: () => [{ field: "title" }] } },
     renderRows: (revision, row, from) => appended.push([revision, row.itemID, from]), select(index) { this.selected = index; }, message() {} });
@@ -1431,17 +1433,17 @@ test("late item batches cannot append into a changed query", async () => {
   try {
     const pending = view.moreItems(); await Promise.resolve(); await Promise.resolve();
     view.revision++; view.rows = [{ itemID: 9 }]; release();
-    assert.equal(await pending, false); assert.deepEqual(view.rows, [{ itemID: 9 }]); assert.equal(view.itemPaging, false);
+    assert.equal(await pending, false); assert.deepEqual(view.rows, [{ itemID: 9 }]); assert.equal(view.itemPaging, null);
   } finally { globalThis.Zotero = previous; }
 });
 
-test("result wheels scroll within candidates and request the next batch at the bottom", () => {
+test("result wheels request more candidates halfway through the available scroll range", () => {
   const view = uiPopup(); view.mode = "authors"; view.rows = [{ key: "one" }]; view.pickerRows = [{ key: "one" }, { key: "two" }];
   Object.assign(view.list, { scrollHeight: 400, clientHeight: 100, scrollTop: 0 });
-  let next = 0; view.more = () => { next++; };
+  let next = 0; view.more = () => { next++; }; view.queueFill = () => view.fillViewport();
   const wheel = extra => ({ deltaY: 2, deltaMode: 1, preventDefault() { this.prevented = true; }, stopPropagation() {}, ...extra });
   const lines = wheel(); view.scrollResults(lines); assert.equal(view.list.scrollTop, 32); assert.equal(lines.prevented, true);
-  view.scrollResults(wheel({ deltaY: 3, deltaMode: 2 })); assert.equal(next, 1);
+  assert.equal(next, 0); view.scrollResults(wheel({ deltaY: 118, deltaMode: 0 })); assert.equal(view.list.scrollTop, 150); assert.equal(next, 1);
   const zoom = wheel({ ctrlKey: true }); view.scrollResults(zoom); assert.equal(zoom.prevented, undefined);
   view.list.scrollHeight = view.list.clientHeight; view.list.scrollTop = 0;
   view.scrollResults(wheel()); assert.equal(next, 2);

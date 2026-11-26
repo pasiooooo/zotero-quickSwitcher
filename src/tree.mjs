@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { t, localize } from "./i18n.mjs";
-import { libraryKey, normalize } from "./core.mjs";
+import { libraryKey } from "./core.mjs";
 import { patch } from "./native.mjs";
 
 const MIME = "application/x-zotero-quickswitcher-search";
@@ -26,8 +26,22 @@ export class SearchTreeAdapter {
   children(object) {
     return this.queries.filter(query => query.libraryID === object.libraryID && (this.parent(query)?.id || null) === (object._ObjectType === "Collection" ? object.id : null));
   }
+  collectionKeys(parent) {
+    const collections = parent._ObjectType === "Collection" ? Zotero.Collections.getByParent(parent.id) : Zotero.Collections.getByLibrary(parent.libraryID);
+    return collections.filter(collection => !collection.deleted).map(collection => collection.key);
+  }
+  orderedChildren(parent, keys) {
+    const library = libraryKey(parent.libraryID);
+    return this.children(parent).map(query => {
+      const placement = this.app.layout.get(library, query.key);
+      return { query, placement, slot: layoutSlot(placement, keys), order: placement?.order ?? this.defaultOrders.get(query.id) };
+    }).sort((first, second) => first.slot - second.slot || first.order - second.order || first.query.name.localeCompare(second.query.name) || first.query.key.localeCompare(second.query.key));
+  }
   async prepare() {
-    this.queries = (await Promise.all(Zotero.Libraries.getAll().filter(lib => ["user", "group"].includes(lib.libraryType)).map(lib => Zotero.Searches.getAll(lib.libraryID)))).flat().filter(query => !query.deleted);
+    const libraries = await Promise.all(Zotero.Libraries.getAll().filter(lib => ["user", "group"].includes(lib.libraryType))
+      .map(async lib => (await Zotero.Searches.getAll(lib.libraryID)).filter(query => !query.deleted)));
+    this.queries = libraries.flat();
+    this.defaultOrders = new Map(libraries.flatMap(queries => queries.map((query, index) => [query.id, (index + 1) * 1024])));
   }
   async init() {
     await this.prepare();
@@ -45,21 +59,18 @@ export class SearchTreeAdapter {
       const allowed = force || this.view._containerState[row.id] === true;
       const result = await original.call(this.view, rows, index, force);
       if (this.closed || !(row.isLibrary(true) && row.isOpen || row.isCollection() && allowed)) return result;
-      const children = this.children(row.ref).filter(query => this.view._includedInTree(query));
       for (let i = subtreeEnd(rows, index) - 1; i > index; i--) if (rows[i].level === row.level + 1 && rows[i].isSearch()) rows.splice(i, 1);
-      const collections = rows.slice(index + 1, subtreeEnd(rows, index)).filter(child => child.level === row.level + 1 && child.isCollection());
-      const keys = collections.map(child => child.ref.key);
-      const ordered = children.map((query, i) => ({ query, p: this.app.layout.get(libraryKey(query.libraryID), query.key), fallback: (i + 1) * 1024 }));
-      ordered.sort((a, b) => layoutSlot(a.p, keys) - layoutSlot(b.p, keys) || (a.p?.order ?? a.fallback) - (b.p?.order ?? b.fallback) || a.query.name.localeCompare(b.query.name));
-      for (const entry of ordered.reverse()) {
-        const slot = layoutSlot(entry.p, keys);
-        let target;
-        if (slot < collections.length) target = rows.indexOf(collections[slot]);
-        else if (collections.length) target = subtreeEnd(rows, rows.indexOf(collections.at(-1)));
-        else target = index + 1 + (rows[index + 1]?.isRecentlyRead?.() ? 1 : 0);
-        rows.splice(target, 0, new Zotero.CollectionTreeRow(this.view, "search", entry.query, row.level + 1));
+      const keys = this.collectionKeys(row.ref), ordered = this.orderedChildren(row.ref, keys).filter(entry => this.view._includedInTree(entry.query));
+      const starts = new Map(); let end = index + 1 + (rows[index + 1]?.isRecentlyRead?.() ? 1 : 0);
+      for (let child = index + 1; child < rows.length && rows[child].level > row.level;) {
+        const next = subtreeEnd(rows, child);
+        if (rows[child].isCollection()) { starts.set(rows[child].ref.key, child); end = next; }
+        child = next;
       }
-      if (children.length) row.isOpen = true;
+      const gaps = [...keys.map(key => starts.get(key)), end];
+      for (let slot = keys.length - 1; slot >= 0; slot--) gaps[slot] ??= gaps[slot + 1];
+      for (const { query, slot } of ordered.reverse()) rows.splice(gaps[slot], 0, new Zotero.CollectionTreeRow(this.view, "search", query, row.level + 1));
+      if (ordered.length) row.isOpen = true;
       return rows.length - count;
     }, this.cleanups);
     patch(this.view, "selectByID", original => async (id, visible) => {
@@ -83,22 +94,22 @@ export class SearchTreeAdapter {
       const row = this.view.getRow(index);
       if (row.isSearch()) { this.drag = { libraryID: row.ref.libraryID, key: row.ref.key }; event.dataTransfer.setData(MIME, JSON.stringify(this.drag)); event.dataTransfer.effectAllowed = "all"; }
     }, this.cleanups);
-    patch(this.view, "onDragEnd", original => (...args) => { this.drag = null; return original.apply(this.view, args); }, this.cleanups);
+    patch(this.view, "onDragEnd", original => (...args) => { this.drag = null; this.markDrop(null); return original.apply(this.view, args); }, this.cleanups);
     patch(this.view, "onDragOver", original => (event, index) => {
-      const drag = this.dragData(event), target = this.view.getRow(index);
-      if (!drag) return original.call(this.view, event, index);
+      const drag = this.dragData(event);
+      if (!drag) { this.markDrop(null); return original.call(this.view, event, index); }
       event.preventDefault();
-      if (drag.libraryID !== target.ref.libraryID || !["collection", "search", "library", "group"].includes(target.type)) { event.dataTransfer.dropEffect = "none"; return; }
-      const rect = this.view.tree.getRowElement(index).getBoundingClientRect(), fraction = (event.clientY - rect.top) / rect.height;
-      this.orientation = target.isLibrary(true) ? 0 : fraction < .25 ? -1 : fraction > .75 ? 1 : target.isSearch() ? 1 : 0;
-      Zotero.DragDrop.currentOrientation = this.orientation;
-      this.view.setDropEffect(event, "move"); this.view._setDropRow(index);
+      const hit = this.dropTarget(event, index, drag);
+      this.view.setDropEffect(event, hit ? "move" : "none");
+      Zotero.DragDrop.currentOrientation = hit?.orientation ?? 0;
+      this.view._setDropRow(hit ? index : null); this.markDrop(hit);
     }, this.cleanups);
     patch(this.view, "onDrop", original => async (event, index) => {
       const drag = this.dragData(event);
       if (!drag) return original.call(this.view, event, index);
-      event.preventDefault(); this.view._setDropRow(null);
-      try { await this.drop(drag, this.view.getRow(index), this.orientation || 0); }
+      const hit = this.dropTarget(event, index, drag);
+      this.view._setDropRow(null); this.markDrop(null); Zotero.DragDrop.currentDropEffect = null;
+      try { if (hit) await this.drop(drag, hit.target, hit.orientation); }
       catch (error) { this.app.logError(error); }
       finally { this.drag = null; }
     }, this.cleanups);
@@ -118,33 +129,45 @@ export class SearchTreeAdapter {
     if (!Array.from(event.dataTransfer?.types || []).includes(MIME)) return null;
     try { return this.drag || JSON.parse(event.dataTransfer.getData(MIME)); } catch { return null; }
   }
+  dropTarget(event, index, drag) {
+    const target = this.view.getRow(index);
+    if (!target?.ref || target.ref.libraryID !== drag.libraryID || !["collection", "search", "library", "group"].includes(target.type) || target.isSearch() && target.ref.key === drag.key) return null;
+    const element = this.view.tree.getRowElement(index), rect = element?.getBoundingClientRect();
+    if (!rect?.height) return null;
+    const fraction = (event.clientY - rect.top) / rect.height;
+    const orientation = target.isLibrary(true) ? 0 : target.isSearch() ? (fraction < .5 ? -1 : 1) : fraction < 1 / 3 ? -1 : fraction > 2 / 3 ? 1 : 0;
+    return { target, element, orientation };
+  }
+  markDrop(hit) {
+    if (this.dropMarker !== hit?.element) this.dropMarker?.removeAttribute("data-qs-search-drop");
+    this.dropMarker = hit?.element;
+    if (hit) hit.element.setAttribute("data-qs-search-drop", hit.orientation < 0 ? "before" : hit.orientation > 0 ? "after" : "inside");
+  }
   async drop(drag, target, orientation) {
     const query = this.queries.find(query => query.key === drag.key && query.libraryID === drag.libraryID);
     if (!query || target.ref.libraryID !== query.libraryID) throw new Error(t("保存搜索只能在其所属文库中组织位置"));
     if (target.isSearch() && target.ref.id === query.id) return false;
-    let p;
-    if (target.isCollection() && orientation === 0) p = { parentCollectionKey: target.ref.key, anchorCollectionKey: null, anchorSide: "after", order: Date.now() };
-    else if (target.isLibrary(true)) p = { parentCollectionKey: null, anchorCollectionKey: null, anchorSide: "after", order: Date.now() };
-    else if (target.isCollection()) {
-      const parent = target.ref.parentID ? Zotero.Collections.get(target.ref.parentID) : null;
-      p = { parentCollectionKey: parent?.key || null, anchorCollectionKey: target.ref.key, anchorSide: orientation < 0 ? "before" : "after", order: Date.now() };
-    } else if (target.isSearch()) {
-      const parent = this.parent(target.ref), current = this.app.layout.get(libraryKey(query.libraryID), target.ref.key);
-      const siblings = this.children(parent || Zotero.Libraries.get(query.libraryID));
-      p = { parentCollectionKey: parent?.key || null, anchorCollectionKey: current?.anchorCollectionKey || null, anchorSide: current?.anchorSide || "after", order: 0 };
-      const same = siblings.map((s, i) => ({ query: s, placement: this.app.layout.get(libraryKey(s.libraryID), s.key), fallback: (i + 1) * 1024 }))
-        .filter(s => s.query.id !== query.id && (s.placement?.anchorCollectionKey || null) === p.anchorCollectionKey && (s.placement?.anchorSide || "after") === p.anchorSide)
-        .sort((a, b) => (a.placement?.order ?? a.fallback) - (b.placement?.order ?? b.fallback));
-      const index = same.findIndex(s => s.query.id === target.ref.id), order = s => s?.placement?.order ?? s?.fallback;
-      const value = order(same[index]);
-      p.order = orientation < 0 ? ((order(same[index - 1]) ?? value - 2048) + value) / 2 : ((order(same[index + 1]) ?? value + 2048) + value) / 2;
-      if (!Number.isFinite(p.order) || p.order === order(same[index - 1]) || p.order === order(same[index + 1]) || p.order === value) {
-        for (const [i, sibling] of same.entries()) await this.app.layout.place(libraryKey(sibling.query.libraryID), sibling.query.key,
-          { ...(sibling.placement || p), order: (i + 1) * 1024 });
-        p.order = (index + 1) * 1024 + (orientation < 0 ? -512 : 512);
-      }
-    } else throw new Error(t("请选择普通文件夹或保存搜索前后位置"));
-    await this.app.layout.place(libraryKey(query.libraryID), query.key, p);
+    if (!["library", "group", "collection", "search"].includes(target.type)) throw new Error(t("请选择普通文件夹或保存搜索前后位置"));
+    const library = libraryKey(query.libraryID), into = target.isLibrary(true) || target.isCollection() && !orientation;
+    const parent = target.isSearch() ? this.parent(target.ref) : target.isCollection() ? (into ? target.ref : target.ref.parentID ? Zotero.Collections.get(target.ref.parentID) : null) : null;
+    const current = target.isSearch() && this.app.layout.get(library, target.ref.key);
+    const destination = { parentCollectionKey: parent?.key ?? null, anchorCollectionKey: target.isCollection() && !into ? target.ref.key : current?.anchorCollectionKey ?? null,
+      anchorSide: target.isCollection() && !into ? (orientation < 0 ? "before" : "after") : current?.anchorSide ?? "after" };
+    const container = parent || Zotero.Libraries.get(query.libraryID), keys = this.collectionKeys(container), slot = layoutSlot(destination, keys);
+    const siblings = this.orderedChildren(container, keys).filter(entry => entry.slot === slot && entry.query.id !== query.id);
+    let index = into || orientation < 0 ? siblings.length : 0;
+    if (target.isSearch()) {
+      index = siblings.findIndex(entry => entry.query.id === target.ref.id);
+      if (index < 0) return false;
+      if (orientation > 0) index++;
+    }
+    const before = siblings[index - 1]?.order ?? -Infinity, after = siblings[index]?.order ?? Infinity;
+    const order = before === -Infinity ? (after === Infinity ? 1024 : after - 1024) : after === Infinity ? before + 1024 : before / 2 + after / 2;
+    if (before < order && order < after) await this.app.layout.place(library, query.key, { ...destination, order });
+    else {
+      siblings.splice(index, 0, { query, placement: destination });
+      await this.app.layout.placeMany(library, siblings.map((entry, position) => [entry.query.key, { ...(entry.placement || destination), order: (position + 1) * 1024 }]));
+    }
     await this.refresh(); await this.view.selectByID("S" + query.id); return true;
   }
   refresh() {
@@ -176,7 +199,7 @@ export class SearchTreeAdapter {
     return this.refreshing;
   }
   async destroy() {
-    this.closed = true; this.drag = null;
+    this.closed = true; this.drag = null; this.markDrop(null);
     await this.refreshing?.catch(() => {});
     for (const cleanup of this.cleanups.splice(0).reverse()) cleanup();
     if (this.win.closed) return;

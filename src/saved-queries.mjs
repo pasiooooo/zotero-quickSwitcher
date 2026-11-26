@@ -17,14 +17,14 @@ export function validateSavedSpec(spec) {
     || !Array.isArray(spec.filters) || spec.filters.length > 64 || spec.nativeConditions !== undefined) throw new Error(t("保存搜索扩展条件无效"));
   if (spec.scope.type !== "library" && !KEY.test(spec.scope[spec.scope.type === "collection" ? "collectionKey" : "searchKey"])) throw new Error(t("保存搜索扩展条件无效"));
   for (const filter of spec.filters) {
-    if (!["author", "directory", "year", "venue", "type", "tabs", "outline"].includes(filter?.type)
+    if (!["author", "directory", "year", "venue", "type", "tag", "tabs", "outline"].includes(filter?.type)
       || typeof filter.value !== "string" || filter.value.length > 2048 || ![undefined, "and", "or"].includes(filter.join)
       || filter.negated !== undefined && typeof filter.negated !== "boolean" || filter.quoted !== undefined && typeof filter.quoted !== "boolean") throw new Error(t("保存搜索扩展条件无效"));
     const ref = filter.ref;
     if (ref && (typeof ref !== "object" || Array.isArray(ref) || typeof ref.kind !== "string" || typeof ref.key !== "string" || ref.key.length > 2048
       || ref.libraryID !== undefined || ref.attachmentID !== undefined || ref.title !== undefined && (typeof ref.title !== "string" || ref.title.length > 2048)
       || ref.libraryKey !== undefined && !LIBRARY.test(ref.libraryKey) || ref.attachmentKey !== undefined && !KEY.test(ref.attachmentKey)
-      || ref.field !== undefined && !["publicationTitle", "publisher"].includes(ref.field))) throw new Error(t("保存搜索扩展条件无效"));
+      || ref.field !== undefined && (ref.kind === "tag" ? ref.field !== "tag" : !["publicationTitle", "publisher"].includes(ref.field)))) throw new Error(t("保存搜索扩展条件无效"));
   }
   if (spec.outlineSource && (!['all', 'pdf'].includes(spec.outlineSource.type) || spec.outlineSource.type === "pdf" && !KEY.test(spec.outlineSource.attachmentKey))) throw new Error(t("保存搜索扩展条件无效"));
   let nodes = 0;

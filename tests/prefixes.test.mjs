@@ -4,8 +4,8 @@ import { DEFAULT_PREFIXES, PRIOR_PREFIXES, LEGACY_PREFIXES, parseLauncherInput, 
 import { Prefs, DEFAULTS, CONFIG_GROUPS, migrateInputGroup, linkModePrefixes } from "../src/prefs.mjs";
 
 test("fixed local guides form fields while URLs and standalone punctuation stay literal", () => {
-  const query = parseLauncherInput('fault :2020 !Nature %journalArticle @Roe /Core \'(Methods) ;(Reader) ');
-  assert.deepEqual(query.filters.map(filter => filter.type), ["year", "venue", "type", "author", "directory", "outline", "tabs"]);
+  const query = parseLauncherInput('fault :2020 !Nature %journalArticle @Roe /Core #(review) \'(Methods) ;(Reader) ');
+  assert.deepEqual(query.filters.map(filter => filter.type), ["year", "venue", "type", "author", "directory", "tag", "outline", "tabs"]);
   assert.equal(query.scopedOutline, true); assert.equal(query.scopedTabs, true);
   const plain = parseLauncherInput('https://doi.org/10.1234/a:b DOI:10.1234/c 95% pressure! "literal : ! % / ;"');
   assert.equal(plain.filters, undefined);
@@ -48,7 +48,7 @@ test("local migration updates query markers and keeps private history and device
   try {
     const prefs = new Prefs(), migrated = prefs.migrateInputSettings(); assert.ok(migrated);
     assert.equal(prefs.get("lastQuery"), '@(Roe) /(Core) '); assert.deepEqual(prefs.get("lastQueryBindings"), bindings);
-    assert.equal(prefs.get("inputSchemaVersion"), 5); assert.equal(prefs.migrateInputSettings(), false);
+    assert.equal(prefs.get("inputSchemaVersion"), 6); assert.equal(prefs.get("tagPrefix"), "#"); assert.equal(prefs.migrateInputSettings(), false);
     assert.equal(prefs.get("launcherShortcut"), "Alt+O"); assert.equal(prefs.get("tabsShortcut"), "Alt+;");
     assert.equal(prefs.exportConfig().settings.lastQuery, undefined);
   } finally { delete globalThis.Zotero; }
@@ -57,7 +57,7 @@ test("local migration updates query markers and keeps private history and device
 test("imports link old symbols, reject bad groups atomically, and reserve the unused command chord", () => {
   const values = new Map(); globalThis.Zotero = { isMac: false, Prefs: { get: key => values.get(key), set: (key, value) => values.set(key, value) } };
   try {
-    const prefs = new Prefs(); prefs.set("directoryPrefix", "#"); assert.equal(prefs.get("directoryShortcut"), "Alt+#");
+    const prefs = new Prefs(); prefs.set("tagPrefix", "~"); prefs.set("directoryPrefix", "#"); assert.equal(prefs.get("directoryShortcut"), "Alt+#");
     assert.throws(() => prefs.set("authorPrefix", "#"), /重复/); assert.equal(prefs.get("authorPrefix"), "@");
     prefs.importConfig({ schemaVersion: 1, settings: { ...Object.fromEntries(Object.entries(PRIOR_PREFIXES).map(([type, value]) => [type + "Prefix", value])), fontSize: 16 } });
     assert.equal(prefs.get("directoryPrefix"), "#"); assert.equal(prefs.get("tabsPrefix"), ";"); assert.equal(prefs.get("fontSize"), 16);
@@ -70,7 +70,7 @@ test("imports link old symbols, reject bad groups atomically, and reserve the un
 test("new reserved symbols move a colliding custom guide rather than losing a whole preference group", () => {
   const values = Object.fromEntries(Object.entries(PRIOR_PREFIXES).map(([type, value]) => [type + "Prefix", value])); values.authorPrefix = "/";
   const migrated = linkModePrefixes(migrateInputGroup("prefixes", values), DEFAULTS, true);
-  assert.equal(migrated.directoryPrefix, "/"); assert.notEqual(migrated.authorPrefix, "/"); assert.equal(new Set(Object.values(migrated)).size, 9);
+  assert.equal(migrated.directoryPrefix, "/"); assert.notEqual(migrated.authorPrefix, "/"); assert.equal(new Set(Object.values(migrated)).size, CONFIG_GROUPS.prefixes.length);
   assert.throws(() => migrateInputGroup("prefixes", { ...values, yearPrefix: "/" }), /重复/);
   const incomplete = { ...values }; delete incomplete.venuePrefix; assert.throws(() => migrateInputGroup("prefixes", incomplete), /无效/);
 });

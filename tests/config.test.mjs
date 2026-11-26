@@ -59,9 +59,9 @@ test("configuration payload includes only portable settings and persists one com
   const a = await client(A);
   a.prefs.apply([["davURL", "https://private.invalid/"], ["davUsername", "private-name"], ["lastQuery", "private query"], ["recentItems", [10]], ["syncInterval", 300]]);
   await a.config.work; assert.deepEqual(a.config.records, {});
-  a.prefs.apply([["authorPrefix", "#"], ["yearPrefix", "^"], ["launcherShortcut", "Ctrl+K"], ["advancedShortcut", "Alt+F"]]);
+  a.prefs.apply([["authorPrefix", "~"], ["yearPrefix", "^"], ["launcherShortcut", "Ctrl+K"], ["advancedShortcut", "Alt+F"]]);
   await a.config.work;
-  assert.equal(a.config.clock, 1); assert.equal(a.config.records.prefixes.values.authorPrefix, "#");
+  assert.equal(a.config.clock, 1); assert.equal(a.config.records.prefixes.values.authorPrefix, "~");
   assert.deepEqual(Object.keys(a.config.records.shortcuts.values), CONFIG_GROUPS.shortcuts);
   await a.config.initializeMissing();
   assert.deepEqual(Object.keys(a.config.records).sort(), Object.keys(CONFIG_GROUPS).sort());
@@ -79,7 +79,7 @@ test("offline edits merge independent settings and keep each shortcut/prefix gro
   const remote = server(), a = await client(A), b = await client(B), sa = syncFor(a, remote), sb = syncFor(b, remote);
   await sa.sync(); await sb.sync();
   remote.offline(true);
-  a.prefs.apply([["authorPrefix", "#"], ["yearPrefix", "^"], ["theme", "dark"]]);
+  a.prefs.apply([["authorPrefix", "~"], ["yearPrefix", "^"], ["theme", "dark"]]);
   b.prefs.apply([["authorPrefix", ":"], ["yearPrefix", "@"], ["width", 70]]);
   await Promise.all([a.config.work, b.config.work]); await assert.rejects(sa.sync(), /offline/);
   assert.equal(a.config.dirty, true); remote.offline(false);
@@ -172,7 +172,7 @@ test("old eight-prefix and three-shortcut records migrate without changing their
   assert.equal(Object.keys(prefixes).length, 8); assert.equal(Object.keys(shortcuts).length, 3);
   const c = await client(A, { ...prefixes, ...shortcuts, lastQuery: "'rock ~Roe ", lastQueryBindings: JSON.stringify([["author:Roe", { kind: "author", key: "roe" }]]) }, JSON.stringify(state));
   assert.equal(c.config.error, undefined); assert.equal(c.prefs.get("lastQuery"), ">rock ~Roe ");
-  assert.equal(c.prefs.get("inputSchemaVersion"), 5); assert.equal(c.config.clock, 7);
+  assert.equal(c.prefs.get("inputSchemaVersion"), 6); assert.equal(c.config.clock, 7);
   await c.config.reconcile(); assert.equal(c.config.clock, 7); assert.deepEqual(c.config.records.prefixes, migrated.records.prefixes);
   assert.equal(c.config.pending.size, 0);
 });
@@ -187,7 +187,7 @@ test("legacy remote input groups upgrade on the receiving device without modifyi
   assert.deepEqual(c.config.records.prefixes.version, version); assert.deepEqual(c.config.records.shortcuts.version, version);
   assert.equal(remote.files.get(configURL(B)), text);
   const uploaded = JSON.parse(remote.files.get(configURL(A)));
-  assert.equal(Object.keys(uploaded.records.prefixes.values).length, 9); assert.equal(Object.keys(uploaded.records.shortcuts.values).length, 6);
+  assert.equal(Object.keys(uploaded.records.prefixes.values).length, CONFIG_GROUPS.prefixes.length); assert.equal(Object.keys(uploaded.records.shortcuts.values).length, 6);
   assert.ok(!JSON.stringify(uploaded).includes("inputSchemaVersion")); assert.equal(c.config.pending.size, 0);
 });
 

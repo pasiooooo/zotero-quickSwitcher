@@ -8,6 +8,8 @@ import { outlineMatches } from "./outline.mjs";
 const labels = { title: "题名", creator: "作者", date: "年份", year: "年份", publicationTitle: "Publication", publisher: "Publisher", itemType: "条目类型", DOI: "DOI", citationKey: "引用键", tag: "标签", abstractNote: "摘要", note: "笔记", annotationText: "批注", annotationComment: "批注评论", fulltextContent: "全文" };
 const defaults = ["title", "creator", "date", "DOI", "citationKey", "tag", "abstractNote"];
 const textOps = new Set(["contains", "is", "beginsWith"]);
+const fieldTypes = ["year", "venue", "type", "tag"];
+const tagGlob = filter => !filter.ref && !filter.quoted && /[*?]/u.test(filter.value) && !/^\*+$/u.test(filter.value);
 
 function metadata(item) {
   const get = field => plainText(item.getField(field, false, true) || "");
@@ -49,6 +51,12 @@ function addFilterLeaf(search, leaf) {
 }
 
 function filterLeaf(filter, libraryID) {
+    if (filter.type === "tag" && !tagGlob(filter)) {
+      const exact = !!(filter.ref || filter.quoted);
+      if (!exact && /^\*+$/u.test(filter.value)) return { join: "all", conditions: [{ condition: "numTags", operator: filter.negated ? "is" : "isGreaterThan", value: "0" }] };
+      const operator = exact ? (filter.negated ? "isNot" : "is") : (filter.negated ? "doesNotContain" : "contains");
+      return { join: "all", conditions: [{ condition: "tag", operator, value: filter.ref?.key ?? filter.value }] };
+    }
     const matches = filter.matches.filter(match => libraryID == null || match.libraryID === libraryID);
     let leaf;
     if (filter.type === "author" && filter.allAuthors) leaf = { join: "all", conditions: [{ condition: "creator", operator: filter.negated ? "isEmpty" : "isNotEmpty", value: "" }] };
@@ -56,8 +64,8 @@ function filterLeaf(filter, libraryID) {
     else if (filter.type === "directory" && matches.some(match => ["library", "feed"].includes(match.kind))) leaf = !filter.negated;
     else {
       const conditions = [...new Map(matches.map(match => {
-        const condition = ["outline", "tabs"].includes(filter.type) ? "itemID" : filter.type === "author" ? "creator" : ["year", "venue", "type"].includes(filter.type) ? match.field : match.kind === "search" ? "savedSearch" : "collection";
-        const value = ["outline", "tabs"].includes(filter.type) ? match.itemID : filter.type === "author" ? match.name : ["year", "venue", "type"].includes(filter.type) ? match.value : match.key;
+        const condition = ["outline", "tabs"].includes(filter.type) ? "itemID" : filter.type === "author" ? "creator" : fieldTypes.includes(filter.type) ? match.field : match.kind === "search" ? "savedSearch" : "collection";
+        const value = ["outline", "tabs"].includes(filter.type) ? match.itemID : filter.type === "author" ? match.name : fieldTypes.includes(filter.type) ? match.value : match.key;
         return [`${condition}:${value}`, { condition, operator: filter.negated ? "isNot" : "is", value }];
       })).values()];
       leaf = conditions.length ? { join: filter.negated ? "all" : "any", conditions } : !!filter.negated;
@@ -141,9 +149,10 @@ export class SearchService {
       if (type === "item") for (const id of ids) this.metadataCache.delete(id);
       else if (type !== "collection-item") this.metadataCache.clear();
       if (["item", "group", "feed", "feedItem"].includes(type)) { this.authorGeneration++; this.authorCache = null; this.fieldCache.clear(); }
+      else if (type === "item-tag" || type === "tag") this.fieldCache.delete("tag");
       this.filterGeneration++;
       this.onInvalidate();
-    } }, ["item", "item-tag", "file", "collection-item", "collection", "search", "group", "feed", "feedItem"]);
+    } }, ["item", "item-tag", "tag", "file", "collection-item", "collection", "search", "group", "feed", "feedItem"]);
   }
   destroy() { Zotero.Notifier.unregisterObserver(this.observer); this.metadataCache.clear(); this.authorGeneration++; this.filterGeneration++; this.authorCache = null; this.fieldCache.clear(); }
   libraries() {
@@ -189,8 +198,7 @@ export class SearchService {
     return [...exact, ...partial];
   }
   async fieldRows(type, text = "") {
-    if (!["year", "venue", "type"].includes(type)) throw new Error(t("未知快捷筛选字段"));
-    const generation = this.authorGeneration;
+    if (!fieldTypes.includes(type)) throw new Error(t("未知快捷筛选字段"));
     if (!this.fieldCache.has(type)) this.fieldCache.set(type, (async () => {
       const libraries = this.libraries().map(library => library.libraryID);
       if (!libraries.length) return [];
@@ -199,6 +207,11 @@ export class SearchService {
       if (type === "type") {
         const rows = await Zotero.DB.queryAsync(`SELECT I.itemTypeID, I.libraryID, COUNT(*) AS count FROM items I WHERE I.libraryID IN (${libraries.map(() => "?").join(",")}) AND ${topLevel} GROUP BY I.itemTypeID, I.libraryID`, libraries);
         records = rows.map(row => { const type = Zotero.ItemTypes.getName(row.itemTypeID); return { libraryID: row.libraryID, count: row.count, field: "itemType", value: type, title: itemTypeLabel(type), aliases: typeLabels[type] || [] }; });
+      } else if (type === "tag") {
+        const rows = await Zotero.DB.queryAsync(`SELECT T.name, I.libraryID, COUNT(DISTINCT I.itemID) AS count FROM itemTags IT
+          JOIN tags T ON T.tagID=IT.tagID JOIN items I ON I.itemID=IT.itemID WHERE I.libraryID IN (${libraries.map(() => "?").join(",")})
+          AND ${topLevel} GROUP BY T.tagID, I.libraryID`, libraries);
+        records = rows.map(row => ({ libraryID: row.libraryID, count: row.count, field: "tag", value: row.name, title: row.name }));
       } else {
         const fields = type === "year" ? ["date"] : ["publicationTitle", "publisher"];
         const ids = field => [...new Set([Zotero.ItemFields.getID(field), ...(Zotero.ItemFields.getTypeFieldsFromBase(field) || [])])];
@@ -217,10 +230,10 @@ export class SearchService {
       }
       return [...grouped.values()].sort((a, b) => type === "year" ? b.title.localeCompare(a.title) : b.count - a.count || a.title.localeCompare(b.title));
     })());
-    let rows;
-    try { rows = await this.fieldCache.get(type); }
-    catch (error) { if (generation === this.authorGeneration) this.fieldCache.delete(type); throw error; }
-    if (generation !== this.authorGeneration) return this.fieldRows(type, text);
+    const pending = this.fieldCache.get(type); let rows;
+    try { rows = await pending; }
+    catch (error) { if (pending === this.fieldCache.get(type)) this.fieldCache.delete(type); throw error; }
+    if (pending !== this.fieldCache.get(type)) return this.fieldRows(type, text);
     if (type === "type") rows = rows.map(row => ({ ...row, title: itemTypeLabel(row.key) }));
     return rows.filter(row => !text.trim() || filterMatches(row.title, text) || type === "type" && (filterMatches(row.key, text) || row.records.some(record => record.aliases.some(alias => filterMatches(alias, text)))));
   }
@@ -228,7 +241,7 @@ export class SearchService {
     if (spec.queryError) throw new Error(t(spec.queryError));
     if (spec.queryTree) validateQueryTree(spec.queryTree, spec.filters);
     if (!spec.filters?.length) return spec;
-    if (spec.filters.length > 64 || spec.filters.some(filter => !["author", "directory", "year", "venue", "type", "outline", "tabs"].includes(filter.type)
+    if (spec.filters.length > 64 || spec.filters.some(filter => !["author", "directory", ...fieldTypes, "outline", "tabs"].includes(filter.type)
       || typeof filter.value !== "string" || ![undefined, "and", "or"].includes(filter.join)
       || filter.negated !== undefined && typeof filter.negated !== "boolean")) throw new Error(t("筛选条件无效"));
     if (!spec.filters.some(filter => ["outline", "tabs"].includes(filter.type)) && spec.resolvedFilters?.length === spec.filters.length && spec.filterGeneration === this.filterGeneration
@@ -244,7 +257,7 @@ export class SearchService {
       spec.filters.some(filter => filter.type === "outline") ? this.outlines(spec) : null,
       spec.filters.some(filter => filter.type === "tabs") ? this.tabs(spec) : [],
     ]);
-    const fieldRows = new Map(await Promise.all([...new Set(spec.filters.map(filter => filter.type).filter(type => ["year", "venue", "type"].includes(type)))].map(async type => [type, await this.fieldRows(type)])));
+    const fieldRows = new Map(await Promise.all([...new Set(spec.filters.filter(filter => fieldTypes.includes(filter.type) && (filter.type !== "tag" || tagGlob(filter))).map(filter => filter.type))].map(async type => [type, await this.fieldRows(type)])));
     if (generation !== this.filterGeneration) return this.prepare({ ...spec, resolvedFilters: undefined });
     const resolvedFilters = spec.filters.map(filter => {
       let matches;
@@ -259,7 +272,8 @@ export class SearchService {
         if (!filter.ref && !filter.quoted && /^\*+$/u.test(filter.value.trim())) return { ...filter, matches: [], allAuthors: true };
         matches = authors.filter(row => filter.ref ? filter.ref.kind === "author" && row.key === filter.ref.key : authorMatches(row, filter.value, { exact: !!filter.quoted })).flatMap(row => row.records)
           .map(record => ({ ...record, name: [record.firstName, record.lastName].filter(Boolean).join(" ").trim() }));
-      } else if (["year", "venue", "type"].includes(filter.type)) {
+      } else if (fieldTypes.includes(filter.type)) {
+        if (filter.type === "tag" && !tagGlob(filter)) return { ...filter, matches: [] };
         if (filter.type === "venue" && !filter.ref && !filter.quoted && /^\*+$/u.test(filter.value.trim())) return { ...filter, matches: [], allValues: true };
         matches = fieldRows.get(filter.type).filter(row => filter.ref ? row.kind === filter.ref.kind && row.key === filter.ref.key && (!filter.ref.field || row.field === filter.ref.field)
           : filterMatches(row.title, filter.value, { exact: !!filter.quoted }) || filter.type === "type" && filterMatches(row.key, filter.value, { exact: !!filter.quoted })).flatMap(row => row.records.map(record => ({ ...record, key: row.key, title: row.title })));
@@ -353,6 +367,7 @@ export class SearchService {
   }
   metadataEvidence(data, itemID, spec) {
     const conditions = [...(spec.nativeConditions || []), ...tokenize(spec.text).flatMap(value => (spec.fields || defaults).map(field => ({ condition: field, operator: "contains", value })))];
+    for (const filter of spec.resolvedFilters || []) if (filter.type === "tag") conditions.push(...(filterLeaf(filter, spec.scope?.libraryID).conditions || []));
     const byField = new Map();
     for (const condition of conditions) {
       if (!["contains", "is", "beginsWith", "doesNotContain", "isNot", "isAfter", "isBefore", "isInTheLast"].includes(condition.operator)) continue;
@@ -410,7 +425,7 @@ export class SearchService {
     }
     return [...byField.values()].map(e => ({ ...e, ranges: e.ranges.sort((a, b) => a.start - b.start), snippet: makeSnippet(e.text, e.ranges) }));
   }
-  async search(spec, { limit = 20, recent = [] } = {}) {
+  async search(spec, { limit, recent = [] } = {}) {
     spec = await this.prepare(spec);
     const ids = spec.scope.type === "all" && spec.filters?.length
       ? [...new Set((await Promise.all(this.libraries().map(lib => this.buildSearch(spec, lib.libraryID).search()))).flat())]

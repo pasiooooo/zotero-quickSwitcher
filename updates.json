@@ -3,9 +3,9 @@
     "zotero-quickswitcher@local": {
       "updates": [
         {
-          "version": "0.2.6",
-          "update_link": "https://github.com/pasiooooo/zotero-quickSwitcher/releases/download/v0.2.6/zotero-quickswitcher-0.2.6.xpi",
-          "update_hash": "sha256:eddcd585123162d9187ed2c46731a4404d28171235046b058fe1534d89e9f211",
+          "version": "0.2.7",
+          "update_link": "https://github.com/pasiooooo/zotero-quickSwitcher/releases/download/v0.2.7/zotero-quickswitcher-0.2.7.xpi",
+          "update_hash": "sha256:35569504dfda3aacdfa74b5cfa89fc21659d021a117327d745683e9b9b1f9a83",
           "applications": {
             "zotero": {
               "strict_min_version": "10.0.7",

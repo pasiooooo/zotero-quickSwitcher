@@ -1,4 +1,4 @@
-# Quick Switcher for Zotero
+# Zotero Quick Switcher
 
 [中文](#readme-zh) · [English](#readme-en) · [下载插件 / Download the XPI][releases]
 
@@ -6,7 +6,7 @@
 
 ## 中文
 
-Quick Switcher for Zotero 是 Zotero 10 的键盘启动器。在同一个面板里，你可以查文献、切换正在读的 PDF、跳到目录或运行命令。检索结果会标出匹配的文字，也会列出文献实际所属的目录。
+Zotero Quick Switcher 是 Zotero 10 的键盘启动器。在同一个面板里，你可以查文献、切换正在读的 PDF、跳到目录或运行命令。检索结果会标出匹配的文字，也会列出文献实际所属的目录。
 
 [安装](#install-zh) · [快速上手](#start-zh) · [检索语法](#syntax-zh) · [设置与同步](#sync-zh) · [开发](#dev-zh)
 
@@ -18,13 +18,13 @@ Quick Switcher for Zotero 是 Zotero 10 的键盘启动器。在同一个面板�
 
 | 功能 | 用途 |
 | --- | --- |
-| 文献检索 | 搜索当前文库或所有文库，组合作者、年份、出版来源、类型和目录条件，也可检索 RSS 条目。 |
+| 文献检索 | 搜索当前文库或所有文库，按作者、年份、标签、出版来源、类型和目录筛选，也可检索 RSS 条目。 |
 | 匹配高亮 | 在结果、Zotero 条目列表和右侧信息栏标出匹配文字，查看摘要、笔记、批注或附件全文中的片段。 |
 | 目录位置 | 显示文献的多处归属，共用的上级路径只显示一次，直接所属的目录会高亮。 |
-| 阅读预览与切换 | 预览 PDF，切换打开的标签页，按大纲标题跳转或分屏阅读。 |
+| 阅读预览与切换 | 预览 PDF，切换标签页，按大纲标题跳转或分屏阅读。大纲会跟随当前章节，检索时保留上级标题。 |
 | 目录与命令 | 进入目录、保存搜索或 RSS，运行当前可用的 Zotero 和插件命令。 |
 | 复制与批量操作 | 多选文献，批量打开、定位、加入目录，或按选定的 CSL 样式复制引文和参考文献；也可以直接复制 PDF 文件。 |
-| 保存搜索 | 编辑原生高级检索条件，将常用查询存为动态搜索。可用 WebDAV 同步保存搜索的布局和插件设置。 |
+| 保存搜索 | 将常用查询存为动态搜索，拖入同一文库的目录，或排在其他搜索和目录前后。可用 WebDAV 同步这套布局。 |
 
 <a id="install-zh"></a>
 
@@ -34,7 +34,7 @@ Quick Switcher for Zotero 是 Zotero 10 的键盘启动器。在同一个面板�
 
 1. 在 [Releases][releases] 下载 `.xpi` 安装包。普通用户不需要下载源码 ZIP。
 2. 在 Zotero 打开「工具 → 插件」，点击齿轮，选择「从文件安装插件」，选中下载的 `.xpi`。
-3. 按 `Alt+O` 打开检索。在 Zotero 设置的 **Quick Switcher for Zotero** 中可以修改快捷键、检索范围和外观。
+3. 按 `Alt+O` 打开检索。在 Zotero 设置的 **Zotero Quick Switcher** 中可以修改快捷键、检索范围和外观。
 
 <a id="start-zh"></a>
 
@@ -58,7 +58,13 @@ Quick Switcher for Zotero 是 Zotero 10 的键盘启动器。在同一个面板�
 
 在设置中点击快捷键，再按下新的组合；`Esc` 取消录入。macOS 上用 `Option` 对应 `Alt`。全局快捷键可单独更改，录入时按 `Backspace` 或 `Delete` 可停用。Windows 上的独立窗口在鼠标所在屏幕打开，可拖动边框调整大小；按 `Esc` 隐藏，下次唤起时复用该窗口。
 
-标签页、大纲和目录是独立的切换模式，输入只筛选文字。目录切换从当前目录或正在读的 PDF 所属目录开始。大纲切换从当前阅读位置开始，只匹配标题，保留上级标题作参照；分屏时跟随当前活动的阅读栏。
+标签页、大纲和目录是独立的切换模式，输入只筛选文字。目录切换从当前目录或正在读的 PDF 所属目录开始。
+
+#### PDF 大纲跟随与样式
+
+按 `Alt+'` 打开大纲，面板会选中正在读的章节；分屏时以当前活动的阅读栏为准。子标题按层级缩进，右侧列出页码。输入关键词后只匹配标题文字，高亮命中词，并保留上级标题，方便区分不同章节下的同名小节。
+
+面板和 Zotero 阅读器左侧的大纲都按段滚动：当前标题在视口上半部时不动，移出这一区域才将它滚到顶部。原生侧栏已经滚到底时，自动跟随不会再把它拉回去；按 `↑`、`↓` 仍可主动导航。
 
 #### 回车动作
 
@@ -100,6 +106,11 @@ PDF 按文件复制，目标软件需支持粘贴文件。引文和参考文献�
 
 面板底部的 CSL 菜单可临时切换样式。在「检索 → 引用复制」中可设置默认样式、语言和按应用匹配的规则。例如，Windows 上可为 `powerpnt.exe` 选简短的样式，为 `winword.exe` 选 GB/T 7714；macOS 上对应的应用名是 `Microsoft PowerPoint` 和 `Microsoft Word`。样式需先安装到 Zotero。规则匹配唤起面板前使用的外部应用，不读取文档标题；手动选择优先，无法识别应用时用默认样式。
 
+PPT CSL 推荐：
+
+- [Zotero丨专门用于PPT引用文献的格式 - Achuan-2](https://www.achuan-2.top/post/zotero-gun-format-for-ppt-reference-literature-1usphn.html)
+- [适合制作PowerPoint报告时候使用的Zotero引文样式 | BIO-SPRING](https://bio-spring.top/post/2016/10/25/2016-10-25-zotero-author-journal-year-style/)
+
 <a id="syntax-zh"></a>
 
 ### 检索语法
@@ -109,6 +120,7 @@ PDF 按文件复制，目标软件需支持粘贴文件。引文和参考文献�
 | 默认引导符 | 条件 | 示例 |
 | --- | --- | --- |
 | `@` | 作者或其他创建者 | `@(linxiaohe)` |
+| `#` | Zotero 条目标签 | `#(待读)` |
 | `/` | 目录、文库、保存搜索或 RSS | `/(街道树木)` |
 | `:` | 年份 | `:(2024 OR 2025)` |
 | `!` | 期刊、出版来源或出版社 | `!(城市样刊)` |
@@ -119,6 +131,8 @@ PDF 按文件复制，目标软件需支持粘贴文件。引文和参考文献�
 | 空格 | 本次检索启用全部字段和正文来源 | 先按一次空格，再输入关键词 |
 
 输入引导符会出现条件块和候选列表。`Enter` 选定候选，`Tab` 离开当前块继续输入；相邻的条件块之间可以不加空格。引导符可在设置中修改，目录、大纲和标签页的引导符随对应快捷键的主键变化。
+
+输入 `#` 可浏览所选文库中的标签。按 `Enter` 选中某个标签，只看带该标签的文献；也可以直接输入 `#待读`，匹配名称含「待读」的标签。`#(待读) :(2025)` 可以进一步限定年份。
 
 多个词默认按 `AND` 连接。用 `AND`、`OR`、`NOT` 和括号组合条件；双引号保留完整短语或字段值。未加引号的条件支持 `*` 和 `?`。要搜索引导符或括号本身，在前面加反斜杠，如 `\@Draft`、`\(`。
 
@@ -133,17 +147,25 @@ PDF 按文件复制，目标软件需支持粘贴文件。引文和参考文献�
 
 结果列出题名、创建者、年份、出版来源和目录树。点击作者、年份、出版来源或路径中的任一目录，会把它加入查询。按住 `Ctrl/Cmd` 点击高亮的直接所属目录，会进入该目录、选中文献并标出文献的其他归属；用同一组合点击普通上级路径则打开该目录。附件、子笔记和批注沿用顶层文献的目录位置。
 
-展开预览可查看元数据、匹配片段和 PDF。PDF 按需加载：标签页预览显示正在读的页，大纲预览显示所选标题对应的页。「预加载条目数」默认是 20，控制第一批结果的数量；继续往下滚动会加载更多。
+结果列表会先填满一屏，不足一屏就显示全部。往下翻到当前这批的中段，下一批就开始加载，不用滚到底。标签、作者和目录里的文献预览也按预览区的高度加载。
+
+展开预览可查看元数据、匹配片段和 PDF。PDF 按需加载：标签页预览显示正在读的页，大纲预览显示所选标题对应的页。
 
 #### Web of Science 检索式
 
-按默认设置，`树冠 :(2025)` 可复制为 `(TS=(树冠) AND PY=(2025))`。目录、标签页和大纲只在 Zotero 中有意义，复制时会略去，并保留其余条件之间的布尔关系。只有年份，或表达式无法安全转换时，面板会说明原因，不覆盖剪贴板。WoS 的收录范围和字段内容与本机文库不同，两边的结果不一定相同。
+按默认设置，`树冠 :(2025)` 可复制为 `(TS=(树冠) AND PY=(2025))`。条目标签、目录、标签页和大纲只在 Zotero 中有意义，复制时会略去，并保留其余条件之间的布尔关系。只有年份，或表达式无法安全转换时，面板会说明原因，不覆盖剪贴板。WoS 的收录范围和字段内容与本机文库不同，两边的结果不一定相同。
 
 ### 高级搜索与保存搜索
 
 按 `Alt+F`，或点击检索式旁的高级按钮，把当前查询转到 Zotero 原生条件编辑器。可调整字段、运算符和条件组，再保存为动态搜索。收起编辑器再展开，已编辑的条件仍在；超过五行条件时，可在条件区内滚动。跨文库检索需要先选定一个文库才能保存。
 
-保存搜索可拖入文件夹、分级和排序，不改变文献的实际归属。原生条件随文献和目录成员变化而更新。作者别名和带通配符的目录名在保存时展开：若后来新增拼写或目录，须重新检索并保存。原生编辑器没有标签页和大纲这两类条件，它们由插件在运行时计算；停用插件或扩展规则尚未同步时，这类保存搜索返回空结果。
+原生条件随文献和目录成员变化而更新。作者别名和带通配符的目录名、标签名在保存时展开：若后来新增匹配的名称，须重新检索并保存。原生编辑器没有标签页和大纲这两类条件，它们由插件在运行时计算；停用插件或扩展规则尚未同步时，这类保存搜索返回空结果。
+
+#### 将保存搜索放进目录并排序
+
+在 Zotero 左侧文库树中，拖动**保存搜索本身**。放在同一文库的目录行中央，会把它移入该目录；放在目录或另一条保存搜索的上、下边缘，看到横线后松手，就会排在目标前、后。拖到文库名称上可移回顶层。右键保存搜索，选「恢复默认搜索位置」可撤销自定义位置。
+
+移动搜索不会把命中的文献加入目录。要归档当前结果，先打开保存搜索，在中间的条目列表中选中文献，再把所选条目拖到目标目录。以后新命中的文献不会自动加入这个普通目录。
 
 <a id="sync-zh"></a>
 
@@ -188,7 +210,7 @@ PDF 预览、大纲和文件复制都需要本机可读的附件；全文检索�
 
 ## English
 
-Quick Switcher for Zotero is a keyboard launcher for Zotero 10. Use one panel to find a paper, switch to a PDF you have open, jump to a collection or run a command. Search results show the matching text and the collections each paper belongs to.
+Zotero Quick Switcher is a keyboard launcher for Zotero 10. Use one panel to find a paper, switch to a PDF you have open, jump to a collection or run a command. Search results show the matching text and the collections each paper belongs to.
 
 [Installation](#install-en) · [Quick start](#start-en) · [Search syntax](#syntax-en) · [Settings and sync](#sync-en) · [Development](#dev-en)
 
@@ -200,13 +222,13 @@ The papers, authors and collections in both examples are fictional.
 
 | Feature | What it does |
 | --- | --- |
-| Library search | Search the current library or all libraries, including RSS items. Combine filters for author, year, publication, item type and collection. |
+| Library search | Search the current library or all libraries, including RSS items. Combine filters for author, year, tag, publication, item type and collection. |
 | Match highlighting | See what matched in the results, Zotero’s item list and the item details pane. Read snippets from abstracts, notes, annotations or attachment text. |
 | Collection paths | See every collection an item belongs to. Shared parent paths appear once; direct memberships stand out. |
-| Reading and previews | Preview a PDF, switch tabs or jump to an outline heading in the current view or a split pane. |
+| Reading and previews | Preview a PDF, switch tabs or jump to a heading in the current view or a split pane. The outline follows your reading position and keeps parent headings visible when you search. |
 | Collections and commands | Open a collection, saved search or RSS feed. Run commands available from Zotero and its plugins in the current context. |
 | Clipboard and batch actions | Open, locate or file several papers at once. Copy their PDFs, or copy citations and bibliography entries in your chosen CSL style. |
-| Saved searches | Edit Zotero’s advanced search conditions and save queries that update as your library changes. WebDAV can sync your saved-search layout and plugin settings. |
+| Saved searches | Save a query, move it into a collection in the same library, or place it before or after another search or collection. WebDAV can sync this layout. |
 
 <a id="install-en"></a>
 
@@ -216,7 +238,7 @@ Requires **Zotero 10.0.7 or a later 10.x release**.
 
 1. Download the `.xpi` file from [Releases][releases]. You don’t need the source ZIP to install the plugin.
 2. In Zotero, open **Tools → Plugins**, click the gear, choose **Install Plugin From File**, and select the `.xpi`.
-3. Press `Alt+O` to open search. To change the shortcuts, search scope or appearance, open **Quick Switcher for Zotero** in Zotero’s settings.
+3. Press `Alt+O` to open search. To change the shortcuts, search scope or appearance, open **Zotero Quick Switcher** in Zotero’s settings.
 
 <a id="start-en"></a>
 
@@ -240,7 +262,13 @@ If you copied plain text in the last three seconds, regular search shows it in g
 
 To change a shortcut, click it in settings and press the new combination. `Esc` cancels. On macOS, use `Option` for `Alt`. The global shortcut has its own setting; press `Backspace` or `Delete` while recording to disable it. On Windows the separate window opens on the screen containing the pointer. Drag its border to resize it or press `Esc` to hide it. Calling it up again reuses the same window.
 
-The tab, outline and collection switchers use plain text, not the query syntax. The collection switcher starts at the selected collection or one containing the PDF you’re reading. The outline starts at your reading position. It matches heading text and shows parent headings for context. In split view it follows the active pane.
+The tab, outline and collection switchers use plain text, not the query syntax. The collection switcher starts at the selected collection or one containing the PDF you’re reading.
+
+#### Following the PDF outline
+
+Press `Alt+'` to open the outline at the section you’re reading. In split view, it uses the active pane. Subheadings are indented and page numbers line up on the right. Searching highlights matches in heading text and keeps the parent headings, so you can tell two sections with the same name apart.
+
+Both the switcher and Zotero’s outline sidebar leave the active heading alone while it’s in the top half of the viewport. When it moves outside that area, it scrolls to the top. Once the sidebar reaches the bottom, automatic scrolling stops there; you can still navigate with `↑` and `↓`.
 
 #### What Enter does
 
@@ -282,6 +310,11 @@ PDFs go on the clipboard as files, so the receiving app must support pasting fil
 
 Use the CSL menu at the bottom of the panel to switch styles for the current task. Under **Search → Citations**, set a default style and language or choose styles by app. On Windows, for example, assign a short style to `powerpnt.exe` and GB/T 7714 to `winword.exe`. On macOS, use the names `Microsoft PowerPoint` and `Microsoft Word`. Install the styles in Zotero first. Rules use the app you were in before opening the launcher; they don’t read document titles. A manual choice takes precedence. If the plugin can’t identify the app, it uses the default style.
 
+PPT CSL Recommend：
+
+- [Zotero丨专门用于PPT引用文献的格式 - Achuan-2](https://www.achuan-2.top/post/zotero-gun-format-for-ppt-reference-literature-1usphn.html)
+- [适合制作PowerPoint报告时候使用的Zotero引文样式 | BIO-SPRING](https://bio-spring.top/post/2016/10/25/2016-10-25-zotero-author-journal-year-style/)
+
 <a id="syntax-en"></a>
 
 ### Search syntax
@@ -291,6 +324,7 @@ By default, search covers titles, creators, years, DOIs, citation keys, tags and
 | Default prefix | Filter | Example |
 | --- | --- | --- |
 | `@` | Author or other creator | `@(linxiaohe)` |
+| `#` | Zotero item tag | `#("to read")` |
 | `/` | Collection, library, saved search or RSS feed | `/("Street trees")` |
 | `:` | Year | `:(2024 OR 2025)` |
 | `!` | Journal, publication or publisher | `!("City Atlas Bulletin")` |
@@ -301,6 +335,8 @@ By default, search covers titles, creators, years, DOIs, citation keys, tags and
 | Space | All fields and text sources for this search | Press Space once before typing the keywords |
 
 A prefix opens a filter and a list of suggestions. Press `Enter` to choose a suggestion and `Tab` to leave the filter and keep typing. Adjacent filters don’t need a space between them. You can change the prefixes in settings. The collection, outline and tab prefixes follow the main key of their respective switcher shortcuts.
+
+Type `#` to browse tags in the selected library or libraries. Press `Enter` on a tag to find items with that exact tag, or type `#review` to match tag names containing “review”. Combine `#("to read")` with `:(2025)` to narrow your reading list by year.
 
 Terms are joined with `AND` by default. Use `AND`, `OR`, `NOT` and parentheses to group conditions. Double quotes preserve a phrase or field value; unquoted conditions accept `*` and `?`. To search for a prefix or parenthesis literally, escape it with a backslash, as in `\@Draft` or `\(`.
 
@@ -315,17 +351,25 @@ canopy @(linxiaohe) :(2024 OR 2025)
 
 Results show the title, creators, year, publication and collection tree. Click an author, year, publication or any collection in a path to add it to the query. `Ctrl/Cmd+click` a highlighted collection to open it, select the paper and show its other memberships. The same gesture on an ordinary parent path opens that collection. Attachments, child notes and annotations use the top-level item’s collection paths.
 
-Expand the preview to see metadata, matching passages and the PDF. PDF pages load on demand: a tab preview shows the page you’re reading, and an outline preview shows the page for the selected heading. **Preload items** defaults to 20 results in the first batch. Scroll down to load more.
+Results fill the pane unless there are too few matches to fill one screen. The next batch starts loading about halfway through the current one. Item lists in tag, author and collection previews use the height of the preview pane instead.
+
+Expand the preview to see metadata, matching passages and the PDF. PDF pages load on demand: a tab preview shows the page you’re reading, and an outline preview shows the page for the selected heading.
 
 #### Web of Science queries
 
-With the default settings, `canopy :(2025)` copies as `(TS=(canopy) AND PY=(2025))`. The copy omits collections, tabs and outline filters, which only make sense in Zotero, and keeps the Boolean relationships between the remaining conditions. If only a year remains or the expression can’t be converted safely, the panel explains why and leaves the clipboard untouched. WoS indexes different publications and fields, so its results can differ from your local results.
+With the default settings, `canopy :(2025)` copies as `(TS=(canopy) AND PY=(2025))`. The copy omits Zotero tags, collections, tabs and outline filters, and keeps the Boolean relationships between the remaining conditions. If only a year remains or the expression can’t be converted safely, the panel explains why and leaves the clipboard untouched. WoS indexes different publications and fields, so its results can differ from your local results.
 
 ### Advanced search and saved searches
 
 Press `Alt+F` or click the advanced search button beside the query to open Zotero’s native condition editor. Edit fields, operators or groups, then save the query as a dynamic search. Collapsing and reopening the editor keeps your edits. If there are more than five rows of conditions, scroll within the editor. For a cross-library query, choose one library before saving.
 
-You can arrange saved searches in folders and reorder them without changing where any paper is filed. Native conditions update as items and memberships change. Author aliases and wildcard collection names expand when you save: run the query and save it again to include a new spelling or collection. Zotero’s native editor has no fields for tabs or PDF outlines; the plugin evaluates those filters when the search runs. A saved search that depends on them returns no results if the plugin is disabled or the rules haven’t synced yet.
+Native conditions update as items and memberships change. Author aliases and wildcard collection or tag names expand when you save: run the query and save it again to include new matching names. Zotero’s native editor has no fields for tabs or PDF outlines; the plugin evaluates those filters when the search runs. A saved search that depends on them returns no results if the plugin is disabled or the rules haven’t synced yet.
+
+#### Moving and sorting saved searches
+
+Drag the **saved search itself** in Zotero’s left-hand library tree. Drop it in the middle of a collection row to move it inside that collection. To change its order, drag to the upper or lower edge of a collection or another saved search and release when the insertion line appears. Drop it on the library name to return it to the top level. To undo a custom placement, right-click the search and choose **Reset search location**.
+
+Moving a search doesn’t file the papers it finds. To add the current results to a collection, open the saved search, select the papers in the middle pane, and drag those items to the collection. Future matches won’t be added to the collection automatically.
 
 <a id="sync-en"></a>
 
@@ -370,3 +414,5 @@ Licensed under [AGPL-3.0-or-later][license]. The plugin includes the [MIT licens
 [issues]: https://github.com/pasiooooo/zotero-quickSwitcher/issues
 [license]: LICENSE
 [third-party]: addon/content/THIRD-PARTY-LICENSES.txt
+[ppt-ref]: https://www.achuan-2.top/post/zotero-gun-format-for-ppt-reference-literature-1usphn.html
+[author-journal-year]: https://bio-spring.top/post/2016/10/25/2016-10-25-zotero-author-journal-year-style/

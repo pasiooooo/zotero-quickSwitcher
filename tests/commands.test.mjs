@@ -200,7 +200,7 @@ test("rows carry the icon of their source: add-on icon for plugin commands and t
     _getOptionMainKey: option => "main-" + option.target,
     updateMenuPopup(popup, menus) { for (const data of menus) { const added = item("Export notes", {}, ["zotero-custom-menu-item", data._key]); added.parentElement = popup; popup.children.push(added); } } };
   const win = windowFor({ ZoteroPane: pane(), menus: [menu("Tools", [item("Add-ons", { id: "addons" }), menu("Zotero PDF Translate", [item("Translate", { id: "translate" })])])] });
-  const { service } = host(t, { manager, addons: [{ id: "notes@example", name: "Notes", iconURL: "chrome://notes/icon.svg" }, { id: "pdf@example", name: "PDF Translate", iconURL: "chrome://pdf/icon.png" }, { id: "qs@local", name: "Quick Switcher for Zotero", iconURL: null }] });
+  const { service } = host(t, { manager, addons: [{ id: "notes@example", name: "Notes", iconURL: "chrome://notes/icon.svg" }, { id: "pdf@example", name: "PDF Translate", iconURL: "chrome://pdf/icon.png" }, { id: "qs@local", name: "Zotero Quick Switcher", iconURL: null }] });
   const rows = await service.index(win), icon = title => rows.find(row => row.title === title).iconURL;
   assert.equal(icon("Add-ons"), "chrome://quickswitcher/content/zotero-command.svg");
   assert.equal(icon("Export notes"), "chrome://notes/icon.svg");
@@ -209,5 +209,5 @@ test("rows carry the icon of their source: add-on icon for plugin commands and t
   assert.equal(win.created.length, 1, "a reader-only plugin menu is not built outside a reader");
   const sources = await service.rows(win, parseCommandInput("@()", 2));
   assert.deepEqual(sources.map(row => [row.kind, row.title, row.iconURL, row.count]), [["command-source", "Notes", "chrome://notes/icon.svg", 1], ["command-source", "PDF Translate", "chrome://pdf/icon.png", 1],
-    ["command-source", "Quick Switcher for Zotero", "", 5], ["command-source", "Zotero", "chrome://quickswitcher/content/zotero-command.svg", 1]]);
+    ["command-source", "Zotero", "chrome://quickswitcher/content/zotero-command.svg", 1], ["command-source", "Zotero Quick Switcher", "", 5]]);
 });

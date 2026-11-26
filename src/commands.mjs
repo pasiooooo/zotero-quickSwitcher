@@ -202,7 +202,7 @@ export class CommandService {
     for (const [key, title, action, dependency] of [["search", "文献检索", () => app.launcherFor(win).show(), ""], ["advanced", "高级搜索", () => app.launcherFor(win).show("items", true), ""],
       ["tabs", "标签页切换", () => app.launcherFor(win).showSwitch("tabs"), ""], ["outline", "大纲切换", () => app.launcherFor(win).showSwitch("outline"), "reader"],
       ["directories", "目录切换", () => app.launcherFor(win).showSwitch("directories"), ""], ["settings", "设置", () => app.openPreferences(), ""]]) if (dependency !== "reader" || reader) {
-      rows.push({ kind: "command", key: "qs:" + key, title: t(title), parent: "", source: app.data.id, sourceTitle: "Quick Switcher for Zotero", win, action, dependency, enabled: true, reason: "", path: "Quick Switcher for Zotero" });
+      rows.push({ kind: "command", key: "qs:" + key, title: t(title), parent: "", source: app.data.id, sourceTitle: "Zotero Quick Switcher", win, action, dependency, enabled: true, reason: "", path: "Zotero Quick Switcher" });
     }
     // A bare number, or a label repeated within one source, names nothing alone; its parent menu supplies the context.
     const repeats = new Map(), labelOf = row => row.source + "\n" + row.title;

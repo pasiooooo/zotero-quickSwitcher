@@ -3,7 +3,7 @@ import { element, installStyle } from "./dom.mjs";
 import { parseShortcut, findShortcutConflicts, shortcutFromEvent, shortcutLabel, shiftedKeys } from "./keys.mjs";
 import { keyAttributes, nativeShortcut } from "./window-keys.mjs";
 import { hotkeyFromShortcut } from "./global-hotkey.mjs";
-import { DEFAULT_PREFIXES, PRIOR_PREFIXES, LEGACY_PREFIXES, availablePrefix, migrateLauncherPrefixes } from "./launcher-query.mjs";
+import { DEFAULT_PREFIXES, PRE_TAG_PREFIXES, PRIOR_PREFIXES, LEGACY_PREFIXES, availablePrefix, migrateLauncherPrefixes } from "./launcher-query.mjs";
 import { t, localize } from "./i18n.mjs";
 
 // What each Enter chord runs per mode; "" leaves the chord unassigned.
@@ -51,15 +51,16 @@ export function shortcutPrefix(value) {
   return key;
 }
 
-export function linkModePrefixes(prefixes, shortcuts, repair = false) {
+export function linkModePrefixes(prefixes, shortcuts, repair = false, needsTag = false) {
   const result = { ...prefixes };
   for (const [name, shortcut] of Object.entries(MODE_PREFIXES)) if (shortcuts[shortcut]) result[name] = shortcutPrefix(shortcuts[shortcut]);
   if (repair) {
     const used = Object.keys(MODE_PREFIXES).map(name => result[name]);
-    for (const [name, value] of Object.entries(result)) if (!Object.hasOwn(MODE_PREFIXES, name)) {
+    for (const [name, value] of Object.entries(result)) if (!Object.hasOwn(MODE_PREFIXES, name) && !(needsTag && name === "tagPrefix")) {
       result[name] = used.includes(value) ? availablePrefix(DEFAULTS[name], [...used, ...Object.values(result)]) : value;
       used.push(result[name]);
     }
+    if (needsTag) result.tagPrefix = availablePrefix(DEFAULTS.tagPrefix, used);
   }
   return result;
 }
@@ -75,7 +76,7 @@ export function migrateInputGroup(group, values) {
   if (!values || Array.isArray(values) || typeof values !== "object") throw new Error(t("同步配置记录无效"));
   const names = CONFIG_GROUPS[group];
   const added = group === "prefixes" ? "outlinePrefix" : group === "shortcuts" ? "outlineShortcut" : null;
-  const legacy = added && !Object.hasOwn(values, added), expected = names?.filter(name => !(legacy && name === added) && !(group === "shortcuts" && ["directoryShortcut", "commandShortcut"].includes(name) && !Object.hasOwn(values, name)));
+  const legacy = added && !Object.hasOwn(values, added), expected = names?.filter(name => !(legacy && name === added) && !(name === "tagPrefix" && !Object.hasOwn(values, name)) && !(group === "shortcuts" && ["directoryShortcut", "commandShortcut"].includes(name) && !Object.hasOwn(values, name)));
   if (!expected || Object.keys(values).length !== expected.length || expected.some(name => !Object.hasOwn(values, name))) throw new Error(t("同步配置记录无效"));
   const result = Object.fromEntries(expected.map(name => [name, validatePreference(name, values[name], true)]));
   if (group === "prefixes") {
@@ -84,6 +85,7 @@ export function migrateInputGroup(group, values) {
       if (result.currentPrefix === LEGACY_PREFIXES.current) result.currentPrefix = availablePrefix(DEFAULT_PREFIXES.current, Object.entries(result).filter(([name]) => name !== "currentPrefix").map(([, marker]) => marker));
       result.outlinePrefix = availablePrefix(DEFAULT_PREFIXES.outline, Object.values(result));
     }
+    result.tagPrefix ??= availablePrefix(DEFAULT_PREFIXES.tag, Object.values(result));
   } else if (group === "shortcuts") {
     if (Object.hasOwn(values, "commandShortcut")) {
       for (const name of names) validatePreference(name, result[name]);
@@ -157,8 +159,8 @@ export function validatePreference(name, value, migrating = false) {
     || ![scope.marker, scope.open, scope.close].every(index => Number.isSafeInteger(index) && index >= 0 && index <= 2048)
     || scope.open !== scope.marker + 1 || scope.close <= scope.open))) throw new Error(t("查询范围记录无效"));
   if (name === "lastQueryBindings" && (!Array.isArray(value) || value.length > 64 || value.some(entry => !Array.isArray(entry) || entry.length !== 2
-    || typeof entry[0] !== "string" || entry[0].length > 2048 || !["author", "year", "venue", "type", "collection", "search", "library", "feed", "feeds", "outline", "tab"].includes(entry[1]?.kind)
-    || !["author", "year", "venue", "type"].includes(entry[1].kind) && !Number.isSafeInteger(entry[1].libraryID)
+    || typeof entry[0] !== "string" || entry[0].length > 2048 || !["author", "year", "venue", "type", "tag", "collection", "search", "library", "feed", "feeds", "outline", "tab"].includes(entry[1]?.kind)
+    || !["author", "year", "venue", "type", "tag"].includes(entry[1].kind) && !Number.isSafeInteger(entry[1].libraryID)
     || entry[1].kind === "venue" && !["publicationTitle", "publisher"].includes(entry[1].field)
     || entry[1].kind === "outline" && !Number.isSafeInteger(entry[1].attachmentID)
     || entry[1].kind !== "library" && (typeof entry[1].key !== "string" || !entry[1].key || entry[1].key.length > 2048)))) throw new Error(t("查询筛选引用无效"));
@@ -189,17 +191,18 @@ export class Prefs {
   set(name, value) { this.apply([[name, value]]); }
   migrateInputSettings() {
     const read = name => { try { return Zotero.Prefs.get(`quickswitcher.${name}`); } catch { return undefined; } };
-    if (read("inputSchemaVersion") === 5) return false;
+    const version = read("inputSchemaVersion");
+    if (version >= 6) return false;
     try {
       const hasOutline = read("outlinePrefix") != null;
-      const fresh = !Object.keys(PRIOR_PREFIXES).some(type => read(type + "Prefix") != null) && read("inputSchemaVersion") == null;
-      const before = Object.fromEntries(Object.entries(fresh ? DEFAULT_PREFIXES : hasOutline ? PRIOR_PREFIXES : LEGACY_PREFIXES).map(([type, marker]) => [type, read(`${type}Prefix`) ?? marker]));
+      const fresh = !Object.keys(DEFAULT_PREFIXES).some(type => read(type + "Prefix") != null) && version == null;
+      const before = Object.fromEntries(Object.entries(fresh ? DEFAULT_PREFIXES : version === 5 ? PRE_TAG_PREFIXES : hasOutline ? PRIOR_PREFIXES : LEGACY_PREFIXES).map(([type, marker]) => [type, read(`${type}Prefix`) ?? marker]));
       let prefixes = migrateInputGroup("prefixes", Object.fromEntries(Object.entries(before).map(([type, marker]) => [`${type}Prefix`, marker])));
       const shortcutFields = shortcutNames.filter(name => !(read(name) == null && ["outlineShortcut", "directoryShortcut", "commandShortcut"].includes(name)));
       const shortcuts = migrateInputGroup("shortcuts", Object.fromEntries(shortcutFields.map(name => [name, read(name) ?? DEFAULTS[name]])));
-      prefixes = linkModePrefixes(prefixes, shortcuts, true);
+      prefixes = linkModePrefixes(prefixes, shortcuts, true, !Object.hasOwn(before, "tag"));
       const after = Object.fromEntries(Object.entries(prefixes).map(([name, marker]) => [name.slice(0, -6), marker]));
-      const entries = [...Object.entries(prefixes), ...Object.entries(shortcuts), ["width", this.get("width")], ["height", this.get("height")], ["inputSchemaVersion", 5]];
+      const entries = [...Object.entries(prefixes), ...Object.entries(shortcuts), ["width", this.get("width")], ["height", this.get("height")], ["inputSchemaVersion", 6]];
       const query = read("lastQuery");
       if (typeof query === "string" && query) entries.push(["lastQuery", migrateLauncherPrefixes(query, before, after)]);
       this.apply(entries); this.errors.delete("inputMigration"); return { prefixes, shortcuts };
@@ -258,7 +261,7 @@ export class Prefs {
     if (legacyPrefixes) {
       const prefixes = Object.fromEntries(prefixNames.map(name => [name, settings[name] ?? this.get(name)]));
       const shortcuts = Object.fromEntries(shortcutNames.map(name => [name, settings[name] ?? this.get(name)]));
-      Object.assign(settings, linkModePrefixes(prefixes, shortcuts, true));
+      Object.assign(settings, linkModePrefixes(prefixes, shortcuts, true, !Object.hasOwn(config.settings, "tagPrefix")));
     }
     const checked = Object.entries(settings).filter(([name]) => !["davMode", "outlineDepth", "openMode"].includes(name) && !privateSettings.has(name) && !deviceSettings.has(name)).map(([name, value]) => [name, validatePreference(name, value, ["width", "height"].includes(name))]);
     this.apply(checked);
@@ -294,9 +297,9 @@ export async function writeCustomCredential(prefs, secret) {
 }
 
 const descriptions = {
-  authorPrefix: "作者引导符", directoryPrefix: "目录引导符", yearPrefix: "年份引导符", venuePrefix: "出版来源引导符", typePrefix: "条目类型引导符", currentPrefix: "当前目录引导符", outlinePrefix: "大纲引导符", fulltextPrefix: "全部字段引导符", tabsPrefix: "标签页引导符",
+  authorPrefix: "作者引导符", tagPrefix: "标签引导符", directoryPrefix: "目录引导符", yearPrefix: "年份引导符", venuePrefix: "出版来源引导符", typePrefix: "条目类型引导符", currentPrefix: "当前目录引导符", outlinePrefix: "大纲引导符", fulltextPrefix: "全部字段引导符", tabsPrefix: "标签页引导符",
   launcherShortcut: "检索快捷键", globalShortcut: "全局快捷键", tabsShortcut: "标签页快捷键", advancedShortcut: "高级搜索快捷键", outlineShortcut: "大纲快捷键", directoryShortcut: "目录快捷键", commandShortcut: "命令快捷键",
-  defaultScope: "默认搜索范围", recursive: "包含子文件夹", limit: "预加载条目数", locationsVisible: "结果中显示的文件夹路径数量",
+  defaultScope: "默认搜索范围", recursive: "包含子文件夹", locationsVisible: "结果中显示的文件夹路径数量",
   restoreQuery: "恢复上次查询", preview: "默认展开预览", theme: "主题", density: "列表密度",
   clipboardSearch: "使用最近复制的文字", clipboardSeconds: "复制后有效时长（秒）",
   language: "语言", fontSize: "字号", width: "最大宽度（%）", height: "最大高度（%）", highlightColor: "高亮颜色",
@@ -315,7 +318,7 @@ export function renderPreferences(win, app) {
   const status = element(doc, "p", { class: "qs-pref-status", role: "status", "aria-live": "polite" });
   const say = (text, error = false) => { localize(status, { text }); status.classList.toggle("error", error); };
   root.append(element(doc, "header", { class: "qs-pref-title" }, [element(doc, "img", { src: "chrome://quickswitcher/content/icon.svg", alt: "", width: 34, height: 34 }),
-    element(doc, "div", {}, [element(doc, "h2", { text: "Quick Switcher for Zotero" }), element(doc, "p", { class: "qs-pref-desc", l10n: { text: "快速找到文献，看清匹配原因与所属文件夹。" } })])]));
+    element(doc, "div", {}, [element(doc, "h2", { text: "Zotero Quick Switcher" }), element(doc, "p", { class: "qs-pref-desc", l10n: { text: "快速找到文献，看清匹配原因与所属文件夹。" } })])]));
   const nav = element(doc, "div", { class: "qs-pref-nav", role: "tablist" });
   root.append(nav);
   const panels = [];
@@ -451,13 +454,13 @@ export function renderPreferences(win, app) {
   items.append(element(doc, "p", { class: "qs-hotkey-state", role: "status", text: app.hotkeyError || "" }));
   field(items, "advancedShortcut"); field(items, "defaultScope");
   field(items, "recursive", "限定当前目录时一并检索子文件夹。");
-  field(items, "limit", "每批默认加载 20 项，滚动接近底部继续加载。"); field(items, "restoreQuery", "打开启动器时填入上次的查询。");
+  field(items, "restoreQuery", "打开启动器时填入上次的查询。");
   const clipboard = element(doc, "div", { class: "qs-pref-clipboard" }); items.append(clipboard);
   field(clipboard, "clipboardSearch"); field(clipboard, "clipboardSeconds");
   items.append(element(doc, "p", { class: "qs-pref-help", l10n: { text: "打开检索时以灰色显示近期复制的文字；Enter 或空格确认，其他按键清除。未确认的文字不保存到查询历史。" } }));
   actionFields(items, "items");
   const filters = section(search, "筛选引导符", "fields", "点击后录入字符。Tab 跳出条件，Esc 取消。");
-  for (const name of ["authorPrefix", "yearPrefix", "venuePrefix", "typePrefix"]) field(filters, name);
+  for (const name of ["authorPrefix", "tagPrefix", "yearPrefix", "venuePrefix", "typePrefix"]) field(filters, name);
   const scopes = section(search, "范围引导符", "scope", "在查询开头输入，限定本次检索的范围。");
   field(scopes, "currentPrefix", "只检索当前目录。"); field(scopes, "fulltextPrefix", "本次检索启用下方全部来源。");
   const sources = section(search, "默认检索来源", "sources", "不带引导符时检索的内容。前七项至少保留一项。");
@@ -491,6 +494,12 @@ export function renderPreferences(win, app) {
   const defaultStyle = stylePicker(app.prefs.get("citationStyle"), value => app.prefs.set("citationStyle", value === "native" ? "" : value), true);
   defaultStyle.setAttribute("data-pref", "citationStyle"); defaultStyle.qsRefresh = () => { defaultStyle.value = app.prefs.get("citationStyle") || "native"; };
   option(citations, element(doc, "label", { class: "qs-pref-field" }, [element(doc, "span", { l10n: { text: "默认 CSL" } }), defaultStyle]));
+  const slideStyles = element(doc, "ul", { class: "qs-slide-styles" });
+  for (const [label, url] of [
+    ["Achuan-2：PPT Ref（题名和 DOI 有多种组合）", "https://www.achuan-2.top/post/zotero-gun-format-for-ppt-reference-literature-1usphn.html"],
+    ["BIO-SPRING：第一作者、期刊、年份", "https://bio-spring.top/post/2016/10/25/2016-10-25-zotero-author-journal-year-style/"],
+  ]) slideStyles.append(element(doc, "li", {}, [element(doc, "a", { href: url, l10n: { text: label }, onclick: event => { event.preventDefault(); Zotero.launchURL(url); } })]));
+  citations.append(element(doc, "p", { class: "qs-pref-help", l10n: { text: "PowerPoint 推荐样式：在 Zotero 中安装后，可在应用规则里选用。" } }), slideStyles);
   const ruleList = element(doc, "div", { class: "qs-csl-rules" }); citations.append(ruleList);
   let visibleStyles = [];
   const populate = menu => {

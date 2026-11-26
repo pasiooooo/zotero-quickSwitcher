@@ -50,7 +50,7 @@ class Application {
     this.config = await new ConfigStore({ prefs: this.prefs, deviceID: this.layout.deviceID,
       onChange: () => this.sync?.schedule(), onApplied: () => this.refreshPreferences() }).init();
     this.paneID = await Zotero.PreferencePanes.register({ pluginID: this.data.id, id: "quickswitcher-preferences",
-      label: "Quick Switcher for Zotero", image: "chrome://quickswitcher/content/icon.svg", src: "chrome://quickswitcher/content/preferences.xhtml",
+      label: "Zotero Quick Switcher", image: "chrome://quickswitcher/content/icon.svg", src: "chrome://quickswitcher/content/preferences.xhtml",
       scripts: ["chrome://quickswitcher/content/preferences.js"], defaultXUL: true });
     this.sync = new WebDAVSync({ prefs: this.prefs, layout: this.layout, config: this.config, onStatus: () => this.updateSyncStatus() });
     await this.sync.start();
@@ -440,12 +440,13 @@ class Application {
     } else if (row.kind === "search") parentKey = this.layout.get(libraryKey(row.libraryID), row.key)?.parentCollectionKey;
     return parentKey ? { kind: "collection", libraryID: row.libraryID, key: parentKey, win: row.win } : { kind: "library", libraryID: row.libraryID, win: row.win };
   }
-  async directoryItems(row, limit = 20) {
+  async directoryItems(row, limit) {
     const scope = row.kind === "collection" ? { type: "collection", libraryID: row.libraryID, collectionKey: row.key, recursive: this.prefs.get("recursive") }
       : row.kind === "search" ? { type: "search", libraryID: row.libraryID, searchKey: row.key } : { type: "library", libraryID: row.libraryID };
     if (row.kind === "feeds") {
       const results = await Promise.all(this.search.libraries().filter(library => library.type === "feed").map(library => this.directoryItems({ kind: "feed", libraryID: library.libraryID }, limit)));
-      return { results: results.flatMap(result => result.results).slice(0, limit), total: results.reduce((total, result) => total + result.total, 0) };
+      const itemIDs = results.flatMap(result => result.itemIDs);
+      return { results: results.flatMap(result => result.results).slice(0, limit), itemIDs, total: itemIDs.length };
     }
     return this.search.search(this.makeSpec(null, { text: "", scope }), { limit });
   }
@@ -535,7 +536,7 @@ class Application {
     const itemID = win.reader?.itemID || tab?.data?.itemID;
     if (itemID) this.recentReads.set(itemID, visit);
   }
-  async recentRows(win, limit = this.prefs.get("limit")) {
+  async recentRows(win, limit) {
     const libraries = this.search.libraries().map(lib => lib.libraryID);
     if (!libraries.length) return { results: [], total: 0, warnings: [] };
     const native = await Zotero.DB.queryAsync(`SELECT COALESCE(IA.parentItemID, IA.itemID) AS itemID, MAX(IA.lastRead) AS lastRead

@@ -19,10 +19,22 @@ const sameRef = (row, ref) => row.kind === ref.kind && row.libraryID === ref.lib
 const selectionKey = row => row.reader || (row.kind === "outline" ? `outline:${row.attachmentID}:${row.outlineKey}` : row.tabID ? `tab:${row.tabID}` : row.itemID ? `item:${row.itemID}` : `${row.kind}:${row.libraryID}:${row.key}`);
 const sameResult = (a, b) => a && b && a.kind === b.kind && (a.kind === "outline" ? a.attachmentID === b.attachmentID && a.outlineKey === b.outlineKey : a.kind === "tab" ? a.tabID === b.tabID && a.win === b.win : a.kind === "reader" ? a.reader === b.reader : a.itemID ? a.itemID === b.itemID : a.key === b.key && a.libraryID === b.libraryID);
 const outlineState = branches => branches.map(({ children, win, ...row }) => [row, outlineState(children)]);
-const pickers = ["directories", "authors", "years", "venues", "types"];
+const fieldPickers = ["years", "venues", "types", "tags"];
+const pickers = ["directories", "authors", ...fieldPickers];
+const screenRows = (pane, row) => Math.max(1, Math.ceil((pane?.clientHeight || 0) / (row?.getBoundingClientRect?.().height || 32)));
+function needsPage(pane, start = 0) {
+  if (!(pane?.clientHeight > 0)) return false;
+  const range = pane.scrollHeight - pane.clientHeight;
+  return range - (pane.scrollTop || 0) <= Math.max(pane.clientHeight / 2, (range - start) / 2) + 1;
+}
+function directoryTreeOrder(rows) {
+  const ordered = [];
+  const visit = branches => { for (const branch of branches.values()) { ordered.push(...branch.entries); visit(branch.children); } };
+  visit(buildLocationTree(rows)); return ordered;
+}
 const enterActions = { read: {}, switch: {}, jump: {}, open: {}, locate: { locate: true }, window: { shifted: true }, split: { shifted: true }, parent: { shifted: true }, web: { web: true }, pdf: { copy: "pdf" }, citation: { copy: "citation" }, bibliography: { copy: "bibliography" } };
 const enterNames = { read: "PDF", locate: "目录", window: "新窗口", web: "DOI/URL", switch: "切换", jump: "跳转", split: "分屏", open: "切换", parent: "上级目录", pdf: "复制 PDF", citation: "引文", bibliography: "参考文献" };
-const filterTypes = { directory: { name: "目录", icon: "folder" }, author: { name: "作者", icon: "author" }, year: { name: "年份", icon: "year" }, venue: { name: "出版来源", icon: "venue" }, type: { name: "条目类型", icon: "types" }, outline: { name: "大纲", icon: "outline" }, tabs: { name: "标签页", icon: "tabs" } };
+const filterTypes = { directory: { name: "目录", icon: "folder" }, author: { name: "作者", icon: "author" }, tag: { name: "标签", icon: "tag" }, year: { name: "年份", icon: "year" }, venue: { name: "出版来源", icon: "venue" }, type: { name: "条目类型", icon: "types" }, outline: { name: "大纲", icon: "outline" }, tabs: { name: "标签页", icon: "tabs" } };
 const matchesQueryTree = (node, text, filters = []) => node.op === "NOT" ? !matchesQueryTree(node.children[0], text, filters)
   : node.op === "AND" ? node.children.every(child => matchesQueryTree(child, text, filters))
     : node.op === "OR" ? node.children.some(child => matchesQueryTree(child, text, filters))
@@ -40,7 +52,7 @@ export class Launcher {
   build() {
     const doc = this.doc;
     this.root = h(doc, "div", { class: "qs-root", id: "qs-launcher", hidden: true });
-    this.dialog = h(doc, "section", { class: "qs-dialog", role: "dialog", "aria-modal": "true", "aria-label": "Quick Switcher for Zotero" });
+    this.dialog = h(doc, "section", { class: "qs-dialog", role: "dialog", "aria-modal": "true", "aria-label": "Zotero Quick Switcher" });
     const searchline = h(doc, "div", { class: "qs-searchline" });
     this.modeIcon = h(doc, "span", { class: "qs-mode-icon", "aria-hidden": "true" });
     this.scopeChip = h(doc, "button", { class: "qs-scope-chip", type: "button", hidden: true, onclick: () => this.clearDirectory() });
@@ -137,10 +149,10 @@ export class Launcher {
     this.feedback = h(doc, "div", { class: "qs-feedback", role: "status", "aria-live": "polite", hidden: true });
     this.tooltip = h(doc, "div", { class: "qs-tooltip", role: "tooltip", hidden: true });
     this.list = h(doc, "div", { class: "qs-results", id: "qs-results", role: "grid", l10n: { "aria-label": "检索结果" }, "aria-colcount": "3" });
-    const continueOutline = () => { if (this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight <= Math.max(120, this.list.clientHeight * .35)) this.more(); };
-    this.list.addEventListener("scroll", () => { if (this.list.scrollHeight > this.list.clientHeight) continueOutline(); });
+    this.list.addEventListener("scroll", () => this.queueFill());
     this.list.addEventListener("wheel", event => this.scrollResults(event), { passive: false });
     this.preview = h(doc, "aside", { class: "qs-preview", hidden: true, l10n: { "aria-label": "文献与匹配详情" } });
+    this.preview.addEventListener("scroll", () => this.queueFill());
     this.body = h(doc, "div", { class: "qs-body" }, [this.list, this.preview]);
     const footer = h(doc, "div", { class: "qs-footer" });
     const footnote = h(doc, "div", { class: "qs-footnote" });
@@ -177,7 +189,11 @@ export class Launcher {
     this.root.addEventListener("pointerdown", () => { this.tooltip.hidden = true; });
     this.root.addEventListener("pointerdown", event => { if (event.target === this.root) this.hide(); });
     this.root.addEventListener("keydown", event => this.keydown(event));
-    this.onResize = () => { this.resizeToContent(); this.renderInputScopes(); this.queueAdvancedHeight(); this.fillOutlineViewport(); };
+    if (this.win.ResizeObserver) {
+      this.viewportObserver = new this.win.ResizeObserver(() => this.queueFill());
+      this.viewportObserver.observe(this.list); this.viewportObserver.observe(this.preview);
+    }
+    this.onResize = () => { this.resizeToContent(); this.renderInputScopes(); this.queueAdvancedHeight(); this.queueFill(); };
     this.win.addEventListener("resize", this.onResize);
     this.onFocusIn = event => {
       if (!this.isOpen || this.allowOutsideFocus || this.root.contains(event.target) || event.target.closest?.("menupopup,panel") || !this.doc.hasFocus()) return;
@@ -224,6 +240,7 @@ export class Launcher {
       this.outlineTree = [];
       this.outlineSize = null;
       this.pickerSize = null;
+      this.pickerSignature = this.resultSignature = null;
       this.outlineProgress = null; this.outlineVisible = 0; this.outlineQuerySignature = null;
       this.nativeConditions = null; this.advancedSpec = null; this.input.readOnly = false; this.advanced.hidden = true; this.advanced.replaceChildren(); this.widget = null;
       this.rows = []; this.rowNodes = []; this.list.replaceChildren(); this.preview.replaceChildren();
@@ -268,6 +285,9 @@ export class Launcher {
     } } catch (error) { this.app.logError(error); }
     this.finishClipboardDraft();
     this.isOpen = false; this.root.hidden = true; this.revision++; this.ready = false; this.disposePDF();
+    this.cancelPickerPreview();
+    if (this.fillFrame != null) this.win.cancelAnimationFrame(this.fillFrame);
+    this.fillFrame = null;
     this.pagedItemIDs = this.recentItemIDs = null;
     this.win.clearTimeout(this.feedbackTimer); if (this.feedback) this.feedback.hidden = true; if (this.tooltip) this.tooltip.hidden = true;
     if (this.inputDrag && this.input.hasPointerCapture?.(this.inputDrag.id)) this.input.releasePointerCapture(this.inputDrag.id);
@@ -286,7 +306,7 @@ export class Launcher {
     if (!keep) { this.input.value = ""; this.inputScopes.reset(""); this.filterBindings.clear(); this.clearSelection(); }
     else this.input.setSelectionRange(this.input.value.length, this.input.value.length);
   }
-  destroy() { this.hide(); this.win.removeEventListener("resize", this.onResize); this.win.removeEventListener("focusin", this.onFocusIn, true); this.root.remove(); }
+  destroy() { this.hide(); this.viewportObserver?.disconnect(); this.win.removeEventListener("resize", this.onResize); this.win.removeEventListener("focusin", this.onFocusIn, true); this.root.remove(); }
   readPrefixes() { return Object.fromEntries(Object.entries(DEFAULT_PREFIXES).map(([type, marker]) => [type, this.app.prefs.get(`${type}Prefix`) || marker])); }
   prefixes() { return this.queryPrefixes ||= this.readPrefixes(); }
   updatePrefixes() {
@@ -588,7 +608,7 @@ export class Launcher {
     if (this.composing || this.switchMode) return;
     const ref = type === "tabs" ? { kind: "tab", key: String(row.attachmentID), attachmentID: row.attachmentID, libraryID: row.libraryID, title: row.title }
       : type === "outline" ? { kind: "outline", key: row.outlineKey, attachmentID: row.attachmentID, libraryID: row.libraryID, title: row.title }
-      : type === "author" ? { kind: "author", key: row.key } : ["year", "venue", "type"].includes(type)
+      : type === "author" ? { kind: "author", key: row.key } : ["year", "venue", "type", "tag"].includes(type)
       ? { kind: row.kind, key: row.key, field: row.field, title: row.title } : { kind: row.kind, libraryID: row.libraryID, key: row.key, title: row.title, path: row.path };
     if (this.advancedSpec) {
       this.addAdvancedFilter(type, row.title, ref).catch(error => this.message(error.message, true)); return;
@@ -719,11 +739,11 @@ export class Launcher {
       const query = this.query(); let spec = this.spec();
       if (query.complete === false && !query.activeFilter) {
         this.currentSpec = spec; this.rows = []; this.rowNodes = []; this.list.replaceChildren(); this.list.classList.remove("pending"); this.ready = false;
-        this.disposePDF(); this.preview.replaceChildren(); this.message(query.error || "检索式尚未完成"); return;
+        this.clearPreview(); this.message(query.error || "检索式尚未完成"); return;
       }
       if (query.complete === false && query.activeFilter) this.message(query.error || "检索式尚未完成");
-      const signature = JSON.stringify([query.mode, spec, this.app.prefs.get("limit")]);
-      if (signature !== this.pickerSignature) { this.pickerVisible = this.app.prefs.get("limit"); this.pickerSignature = signature; }
+      const signature = JSON.stringify([this.switchMode, query.mode, spec]);
+      if (signature !== this.pickerSignature) { this.pickerVisible = this.firstPageSize(); this.pickerSignature = signature; }
       if (query.mode === "items") spec = await this.app.search.prepare(spec);
       if (!this.isOpen || this.revision !== revision) return;
       this.currentSpec = spec;
@@ -732,15 +752,14 @@ export class Launcher {
         await this.commandIndex;
         if (!this.isOpen || revision !== this.revision) return;
         const rows = await this.app.commands.rows(this.win, query);
-        result = { results: rows, total: rows.length, warnings: [] };
+        result = { all: rows, total: rows.length, warnings: [] };
       } else if (this.switchMode === "outline") {
-        if (signature !== this.outlineQuerySignature) { this.outlineVisible = this.app.prefs.get("limit"); this.outlineQuerySignature = signature; this.list.scrollTop = 0; }
+        if (signature !== this.outlineQuerySignature) { this.outlineVisible = this.pickerVisible; this.outlineQuerySignature = signature; this.list.scrollTop = 0; }
         const progress = this.outlineContext.type === "pdf" ? await this.app.outline.search("", this.outlineContext, { owner: this, win: this.win }) : { rows: [], allRows: [], total: 0, completed: 0, documents: 0, pending: false };
         const rows = progress.rows.filter(row => switchMatches(row.title, query.text));
         if (!query.text.trim() && signature !== this.resultSignature) {
           preferred = currentOutlineRow(rows, this.outlineContext.reader);
-          const limit = this.app.prefs.get("limit"), index = rows.indexOf(preferred);
-          this.outlineVisible = Math.min(rows.length, Math.max(this.outlineVisible, Math.ceil((index + 1) / limit) * limit));
+          this.outlineVisible = Math.max(this.outlineVisible, rows.indexOf(preferred) + 1);
         }
         result = { results: rows.slice(0, this.outlineVisible), allRows: progress.allRows, total: rows.length, warnings: [], progress: { ...progress, rows, total: rows.length } };
       } else if (this.switchMode === "directories") {
@@ -748,9 +767,9 @@ export class Launcher {
         const rows = all.filter(row => (!this.collectionPicker || row.kind === "collection" && row.libraryID === this.collectionPicker.libraryID) && switchMatches(row.path, query.text));
         const start = !query.text.trim() && await this.directoryStart;
         preferred = start && rows.find(row => row.kind === start.kind && row.libraryID === start.libraryID && (!start.key || row.key === start.key));
-        result = { results: rows, total: rows.length, warnings: [] };
+        result = { all: rows, total: rows.length, warnings: [] };
       } else if (query.mode === "outline") {
-        if (signature !== this.outlineQuerySignature) { this.outlineVisible = this.app.prefs.get("limit"); this.outlineQuerySignature = signature; this.list.scrollTop = 0; }
+        if (signature !== this.outlineQuerySignature) { this.outlineVisible = this.pickerVisible; this.outlineQuerySignature = signature; this.list.scrollTop = 0; }
         let itemIDs, filterIDs;
         if (query.scopedOutline) {
           const progress = await this.app.outline.search("", this.outlineContext, { owner: this, win: this.win,
@@ -758,7 +777,7 @@ export class Launcher {
           const filter = query.activeFilter, pattern = filter.quoted ? JSON.stringify(filter.value) : filter.value;
           const terms = tokenize(pattern);
           const rows = progress.rows.filter(row => terms.every(term => filterMatches([...row.parents, row.title].join(" › "), term)));
-          result = { results: rows.slice(0, this.outlineVisible || this.app.prefs.get("limit")), allRows: progress.allRows, total: rows.length, warnings: [], progress: { ...progress, rows, total: rows.length } };
+          result = { results: rows.slice(0, this.outlineVisible), allRows: progress.allRows, total: rows.length, warnings: [], progress: { ...progress, rows, total: rows.length } };
         } else if (spec.queryTree) {
           spec = await this.app.search.prepare(spec); this.currentSpec = spec;
           if (spec.filters?.length) {
@@ -783,7 +802,7 @@ export class Launcher {
         }
       } else if (query.mode === "tabs") {
         let rows = await this.app.tabRows(this.win, this.switchMode ? query.text : query.activeFilter?.value || "", { literal: !!this.switchMode });
-        result = { results: rows.slice(0, this.pickerVisible), all: rows, total: rows.length, warnings: [] };
+        result = { all: rows, total: rows.length, warnings: [] };
       } else if (query.mode === "directories") {
         const fragment = query.filters?.find(filter => filter.start === query.activeFilter?.start), bound = fragment && this.filterBindings.get(`directory:${fragment.value}`);
         const fragmentText = query.activeFilter?.value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
@@ -792,7 +811,7 @@ export class Launcher {
         const name = preferred?.title || bound?.title || query.activeFilter?.value.replace(/ · \d+$/u, "");
         const matches = bound ? rows.filter(row => filterMatches(row.title, name) || filterMatches(row.path, name)) : rows;
         const ordered = preferred ? [preferred, ...matches.filter(row => row !== preferred)] : matches;
-        result = { results: ordered.slice(0, this.pickerVisible), all: ordered, total: matches.length, warnings: [] };
+        result = { all: ordered, total: matches.length, warnings: [] };
       } else if (query.mode === "authors") {
         const fragment = query.filters.find(filter => filter.start === query.activeFilter.start), bound = this.filterBindings.get(`author:${fragment.value}`);
         const rows = await this.app.search.authorRows(bound ? "" : query.activeFilter.value), original = bound && rows.find(row => sameRef(row, bound));
@@ -800,8 +819,8 @@ export class Launcher {
         const matches = rows.filter(row => (!bound || authorMatches(row, name)) && (spec.scope.type === "all" || row.records.some(record => record.libraryID === spec.scope.libraryID)));
         preferred = bound && matches.find(row => sameRef(row, bound));
         const ordered = preferred ? [preferred, ...matches.filter(row => row !== preferred)] : matches;
-        result = { results: ordered.slice(0, this.pickerVisible), all: ordered, total: matches.length, warnings: [] };
-      } else if (["years", "venues", "types"].includes(query.mode)) {
+        result = { all: ordered, total: matches.length, warnings: [] };
+      } else if (fieldPickers.includes(query.mode)) {
         const filter = query.activeFilter, bound = this.filterBindings.get(`${filter.type}:${filter.value}`);
         const rows = (await this.app.search.fieldRows(filter.type, bound ? "" : filter.value)).map(row => {
           const records = row.records.filter(record => spec.scope.type === "all" || record.libraryID === spec.scope.libraryID);
@@ -811,21 +830,27 @@ export class Launcher {
         const matches = bound ? rows.filter(row => row === original || filterMatches(row.title, pattern) || filter.type === "type" && filterMatches(row.key, pattern)) : rows;
         preferred = original;
         const ordered = original ? [original, ...matches.filter(row => row !== original)] : matches;
-        result = { results: ordered.slice(0, this.pickerVisible), all: ordered, total: matches.length, warnings: [] };
+        result = { all: ordered, total: matches.length, warnings: [] };
       } else if (query.kind === "fulltext" && !query.text.trim()) result = { results: [], total: 0, warnings: [] };
       else if (query.kind === "recent" && !this.nativeConditions && this.advanced.hidden) result = await this.app.recentRows(this.win, this.pickerVisible);
       else result = await this.app.search.search(spec, { limit: this.pickerVisible, recent: this.app.prefs.get("recentItems") });
       if (!this.isOpen || this.revision !== revision) return;
+      if (result.all) {
+        if (query.mode === "directories") result.all = directoryTreeOrder(result.all);
+        if (preferred) this.pickerVisible = Math.max(this.pickerVisible, result.all.indexOf(preferred) + 1);
+        result.results = result.all.slice(0, this.pickerVisible);
+      }
       const previous = signature === this.resultSignature ? this.rows[this.selected] : null, displayedRows = this.rows, displayedSelection = this.selected, scroll = this.list.scrollTop;
-      if (signature !== this.resultSignature) { this.picked?.clear(); this.selectionAnchor = null; }
+      if (signature !== this.resultSignature) { this.picked?.clear(); this.selectionAnchor = null; this.pageStart = this.list.scrollTop = 0; }
       this.itemIDs = result.itemIDs || result.results.map(row => row.itemID).filter(Boolean);
       this.recentItemIDs = !this.switchMode && query.kind === "recent" && !this.nativeConditions && this.advanced.hidden ? this.itemIDs : null;
       this.pagedItemIDs = !this.switchMode && query.mode === "items" ? this.itemIDs : null;
+      this.itemPaging = null;
       if (query.mode === "items" && this.picked?.size) {
         const valid = new Set(this.itemIDs);
         for (const [key, row] of this.picked) if (!valid.has(row.itemID)) this.picked.delete(key);
       }
-      this.rows = result.results; this.selected = Math.max(0, this.rows.findIndex(row => sameResult(row, previous))); this.ready = true; this.resultSignature = signature;
+      this.rows = result.results; this.selected = Math.max(0, this.rows.findIndex(row => sameResult(row, previous || preferred))); this.ready = true; this.resultSignature = signature;
       this.pickerRows = result.all || null;
       if (query.mode === "outline") {
         this.outlineTree = buildOutlineTree(result.results, { allRows: result.allRows || result.results, groupDocuments: this.outlineContext.type !== "pdf" });
@@ -835,11 +860,11 @@ export class Launcher {
       const outlineSignature = query.mode === "outline" && JSON.stringify([signature, outlineState(this.outlineTree)]);
       const rowsChanged = !outlineSignature || outlineSignature !== this.outlineResultSignature;
       if (rowsChanged) {
-        this.renderRows(revision, previous); this.outlineResultSignature = outlineSignature;
+        this.renderRows(revision, previous || preferred); this.outlineResultSignature = outlineSignature;
         if (query.mode === "outline" && previous) this.list.scrollTop = scroll;
       } else { this.rows = displayedRows; this.selected = displayedSelection; }
       this.list.classList.remove("pending");
-      if (preferred && !previous) this.select(Math.max(0, this.rows.findIndex(row => query.mode === "outline" ? sameResult(row, preferred) : row.kind === preferred.kind && row.libraryID === preferred.libraryID && row.key === preferred.key)), ["directories", "outline"].includes(this.switchMode));
+      if (preferred && !previous && ["directories", "outline"].includes(this.switchMode)) this.select(this.selected, true, false);
       if (this.selectionAnchor == null) this.selectionAnchor = this.selected;
       const label = query.mode === "outline" ? t(this.outlineContext.type === "pdf" ? "当前 PDF 大纲" : "全局 PDF 大纲") : query.mode === "tabs" ? t("标签页") : pickers.includes(query.mode) ? t(query.activeFilter ? filterTypes[query.activeFilter.type].name : "目录") : query.kind === "recent" && this.advanced.hidden ? t("最近阅读") : query.kind === "fulltext" ? t("全部字段") : query.current ? t("当前目录") : spec.scope.type === "all" ? t("所有文库") : Zotero.Libraries.get(spec.scope.libraryID)?.name || this.context.libraryName;
       this.countLabel = this.switchMode === "commands" ? t("命令") : label;
@@ -851,9 +876,9 @@ export class Launcher {
       if (query.mode === "outline") this.status.title = this.outlineContext.type === "pdf" ? this.outlineContext.title : t("仅检索本机 PDF，不下载附件");
       this.save.disabled = spec.scope.type === "all";
       this.save.title = t(this.save.disabled ? "切换到单一文库后保存" : query.scopedOutline || query.scopedTabs ? "保存动态条件（需插件）" : "保存当前搜索");
-      this.fillOutlineViewport();
+      this.queueFill();
     } catch (error) {
-      if (revision === this.revision && this.isOpen) { this.rows = []; this.ready = false; this.list.replaceChildren(); this.rowNodes = []; this.list.classList.remove("pending"); this.disposePDF(); this.preview.replaceChildren(); this.message(error.message || "检索失败", true); }
+      if (revision === this.revision && this.isOpen) { this.rows = []; this.ready = false; this.list.replaceChildren(); this.rowNodes = []; this.list.classList.remove("pending"); this.clearPreview(); this.message(error.message || "检索失败", true); }
     } finally {
       this.running = false;
       if (this.queued || revision !== this.revision) { this.queued = false; if (this.isOpen) this.run(); }
@@ -862,15 +887,16 @@ export class Launcher {
   renderRows(revision, preferred, from = 0) {
     this.resizeToContent();
     const doc = this.doc, spec = this.currentSpec;
-    if (!from) { this.list.replaceChildren(); this.rowNodes = []; this.input.removeAttribute("aria-activedescendant"); }
+    if (!from) { this.list.replaceChildren(); this.rowNodes = []; this.directoryNodes = null; this.input.removeAttribute("aria-activedescendant"); }
     if (!this.rows.length) {
       const query = this.query();
       this.list.append(h(doc, "p", { class: "qs-empty", l10n: { text: this.collectionPicker ? "未找到目录；输入名称后新建" : query.mode === "outline" ? "暂无可跳转的大纲" : query.kind === "recent" ? "暂无最近阅读" : query.mode === "tabs" ? "没有匹配的标签页" : query.mode === "directories" ? "没有匹配的目录" : query.mode === "authors" ? "没有匹配的作者" : query.kind === "fulltext" && !query.text.trim() ? "输入关键词" : "没有匹配结果" } }));
-      this.disposePDF(); this.preview.replaceChildren(); return;
+      this.clearPreview(); return;
     }
     let terms = []; try { terms = this.switchMode ? switchTerms(this.query().text) : tokenize(this.query().activeFilter?.value || this.query().text); } catch { /* Query errors are shown by run(). */ }
     if (this.switchMode === "commands") {
-      for (const [index, row] of this.rows.entries()) {
+      for (let index = from; index < this.rows.length; index++) {
+        const row = this.rows[index];
         const node = h(doc, "div", { id: `qs-option-${index}`, class: "qs-result qs-command-result", role: "row", "aria-selected": "false", "data-index": index,
           onclick: () => { this.select(index, false); this.activate(); } });
         const title = h(doc, "div", { class: "qs-result-title" }, [row.iconURL ? h(doc, "img", { class: "qs-command-icon", src: row.iconURL, alt: "", "aria-hidden": "true" }) : icon(doc, row.kind === "command-source" ? "types" : "commands")]);
@@ -879,17 +905,22 @@ export class Launcher {
           : [row.sourceTitle, row.reason || (row.dependency ? t(({ items: "依据所选条目", collection: "依据所选目录", reader: "依据当前阅读器", field: "依据所选信息字段", tab: "依据当前标签页" })[row.dependency]) : "")].filter(Boolean).join(" · ") }));
         this.list.append(node); this.rowNodes[index] = node;
       }
-      this.select(this.selected, false, false); return;
+      this.select(this.selected, false, false, from); return;
     }
     if (this.mode === "directories") {
-      const tree = buildLocationTree(this.rows.map(row => ({ ...row }))), ordered = [];
-      const append = (parent, branches) => {
-        for (const branch of branches.values()) {
-          const group = h(doc, "div", { class: "qs-directory-branch", role: "presentation" });
+      let cursor = from;
+      const append = (parent, branches, nodes) => {
+        for (const [key, branch] of branches) {
+          let saved = nodes.get(key);
+          if (!saved) {
+            saved = { group: h(doc, "div", { class: "qs-directory-branch", role: "presentation" }), nodes: new Map() };
+            nodes.set(key, saved); parent.append(saved.group);
+            if (!branch.entries.length) saved.group.append(h(doc, "div", { class: "qs-directory-ancestor", text: branch.label }));
+          }
           for (const row of branch.entries) {
-            row.index = ordered.length; ordered.push(row);
-            const node = h(doc, "div", { class: "qs-result qs-directory-result", role: "row", "aria-selected": "false", "data-index": row.index });
-            const main = h(doc, "div", { class: "qs-result-main qs-directory-name", role: "gridcell", "aria-label": row.path, id: `qs-option-${row.index}`, tabindex: -1, onclick: event => this.clickResult(event, row.index) });
+            const index = cursor++;
+            const node = h(doc, "div", { class: "qs-result qs-directory-result", role: "row", "aria-selected": "false", "data-index": index });
+            const main = h(doc, "div", { class: "qs-result-main qs-directory-name", role: "gridcell", "aria-label": row.path, id: `qs-option-${index}`, tabindex: -1, onclick: event => this.clickResult(event, index) });
             main.append(icon(doc, row.kind === "library" ? "library" : ["feed", "feeds"].includes(row.kind) ? "rss" : row.kind === "search" ? "save" : "folder"));
             const name = h(doc, "span", { class: "qs-result-title" }); appendMarked(name, row.title, terms.flatMap(term => matchRanges(row.title, term))); main.append(name);
             const count = h(doc, "span", { class: "qs-directory-count", text: "…", title: t("正在统计条目…") }); main.append(count);
@@ -898,21 +929,23 @@ export class Launcher {
               count.textContent = String(value); count.title = t(row.kind === "collection" && this.app.prefs.get("recursive") ? "{count} 条，包含子目录并去重" : "{count} 条", { count: value });
               count.setAttribute("aria-label", count.title);
             }).catch(error => { if (revision === this.revision) { count.textContent = "?"; count.title = error.message; } });
-            node.append(main); node.addEventListener("pointermove", event => { if ((event.movementX || event.movementY) && this.selected !== row.index) this.select(row.index, false); });
-            this.rowNodes[row.index] = node; group.append(node);
+            node.append(main); node.addEventListener("pointermove", event => { if ((event.movementX || event.movementY) && this.selected !== index) this.select(index, false); });
+            this.rowNodes[index] = node; saved.group.append(node);
           }
-          if (!branch.entries.length) group.append(h(doc, "div", { class: "qs-directory-ancestor", text: branch.label }));
-          if (branch.children.size) { const children = h(doc, "div", { class: "qs-directory-children", role: "presentation" }); append(children, branch.children); group.append(children); }
-          parent.append(group);
+          if (branch.children.size) {
+            if (!saved.children) { saved.children = h(doc, "div", { class: "qs-directory-children", role: "presentation" }); saved.group.append(saved.children); }
+            append(saved.children, branch.children, saved.nodes);
+          }
         }
       };
-      const previous = this.rows[this.selected]; append(this.list, tree); this.rows = ordered; this.select(Math.max(0, this.rows.findIndex(row => sameResult(row, previous))), false); return;
+      append(this.list, buildLocationTree(this.rows.slice(from)), this.directoryNodes ||= new Map());
+      this.select(this.selected, false, !from, from); return;
     }
     if (this.mode === "authors") {
       const active = this.query().activeFilter, bound = active && this.filterBindings.get(`author:${active.value}`);
       const compactName = name => normalize(name).replace(/[\s.,，·'’-]/gu, "");
-      for (const [index, row] of this.rows.entries()) {
-        if (index < from) continue;
+      for (let index = from; index < this.rows.length; index++) {
+        const row = this.rows[index];
         const node = h(doc, "div", { class: "qs-result qs-author-result", role: "row", "aria-selected": "false", "data-index": index });
         const main = h(doc, "div", { class: "qs-result-main", role: "gridcell", id: `qs-option-${index}`, tabindex: -1, onclick: () => { this.select(index); this.activate(); } });
         const title = h(doc, "div", { class: "qs-result-title" }), name = h(doc, "span", { class: "qs-author-name" });
@@ -925,11 +958,11 @@ export class Launcher {
         node.append(main); node.addEventListener("pointermove", event => { if ((event.movementX || event.movementY) && this.selected !== index) this.select(index, false); });
         this.rowNodes.push(node); this.list.append(node);
       }
-      this.select(this.selected, false, !from); return;
+      this.select(this.selected, false, !from, from); return;
     }
-    if (["years", "venues", "types"].includes(this.mode)) {
-      for (const [index, row] of this.rows.entries()) {
-        if (index < from) continue;
+    if (fieldPickers.includes(this.mode)) {
+      for (let index = from; index < this.rows.length; index++) {
+        const row = this.rows[index];
         const node = h(doc, "div", { class: "qs-result qs-facet-result", role: "row", "aria-selected": "false", "data-index": index });
         const main = h(doc, "div", { class: "qs-result-main qs-directory-name", role: "gridcell", id: `qs-option-${index}`, tabindex: -1, onclick: () => { this.select(index); this.activate(); } });
         const name = h(doc, "span", { class: "qs-result-title" }); appendMarked(name, row.title, terms.flatMap(term => matchRanges(row.title, term)));
@@ -939,13 +972,13 @@ export class Launcher {
         node.addEventListener("pointermove", event => { if ((event.movementX || event.movementY) && this.selected !== index) this.select(index, false); });
         this.rowNodes.push(node); this.list.append(node);
       }
-      this.select(this.selected, false, !from); return;
+      this.select(this.selected, false, !from, from); return;
     }
     if (this.mode === "outline") {
       this.renderOutlineRows(revision, preferred); return;
     }
-    for (const [index, row] of this.rows.entries()) {
-      if (index < from) continue;
+    for (let index = from; index < this.rows.length; index++) {
+      const row = this.rows[index];
       const node = h(doc, "div", { class: "qs-result", role: "row", "aria-selected": String(index === this.selected), "data-index": index });
       const main = h(doc, "div", { class: "qs-result-main", role: "gridcell", id: `qs-option-${index}`, tabindex: -1, onclick: event => this.clickResult(event, index) });
       const title = h(doc, "div", { class: "qs-result-title" });
@@ -984,11 +1017,10 @@ export class Launcher {
         this.app.locations.get(row.itemID).then(result => {
           if (!this.isOpen || revision !== this.revision || !node.isConnected) return;
           row.locationResult = result; this.renderLocations(locations, row, result, spec); this.resizeToContent();
-          if (this.selected === index && !this.preview.hidden) this.updatePreview(revision);
         }).catch(() => { if (node.isConnected && revision === this.revision) localize(locations, { text: "位置暂不可用" }); });
       }
     }
-    this.select(this.selected, false, !from);
+    this.select(this.selected, false, !from, from);
   }
   renderLocations(container, row, result, spec = this.currentSpec) {
     const doc = this.doc; container.replaceChildren();
@@ -1058,71 +1090,94 @@ export class Launcher {
     let selected = this.rows.findIndex(row => !row.contextOnly && (row.key === previous?.key || sameResult(row, previous)));
     if (selected < 0) selected = this.rows.findIndex(row => !row.contextOnly && !row.isDocument && row.location);
     if (selected < 0) selected = this.rows.findIndex(row => !row.contextOnly);
-    this.select(Math.max(0, selected), false, !preservePreview);
+    this.select(Math.max(0, selected), false, !preservePreview, 0);
     this.resizeToContent();
   }
+  rowElement(index = this.selected) {
+    const node = this.rowNodes?.[index];
+    return this.mode === "outline" ? node?.querySelector?.(":scope > .qs-outline-result") || node : node;
+  }
+  pageSize() { return screenRows(this.list, this.rowElement()); }
+  firstPageSize() {
+    const classes = this.dialog?.classList;
+    classes?.add("qs-measure-page");
+    const size = screenRows(this.list, this.list.querySelector?.(".qs-result"));
+    classes?.remove("qs-measure-page"); return size;
+  }
+  hasMoreRows() {
+    return this.mode === "outline" ? this.outlineVisible < (this.outlineProgress?.rows.length || 0)
+      : this.rows.length < (this.pagedItemIDs || this.pickerRows || []).length;
+  }
+  queueFill() {
+    if (!this.isOpen || this.fillFrame != null || !this.win?.requestAnimationFrame) return;
+    this.fillFrame = this.win.requestAnimationFrame(() => { this.fillFrame = null; this.fillViewport(); });
+  }
+  fillViewport() {
+    if (!this.isOpen || !this.ready || this.composing) return;
+    if (this.hasMoreRows() && needsPage(this.list, this.pageStart)) this.more();
+    if (this.previewPage?.ready && needsPage(this.preview, this.previewPage.start)) this.morePreview();
+  }
   more() { return this.mode === "outline" ? this.moreOutline() : this.pagedItemIDs ? this.moreItems() : this.morePicker(); }
-  async moreItems() {
+  itemPage(ids, spec, withEvidence = false) {
+    const evidenceSpec = withEvidence && queryEvidenceSpec(spec);
+    return Promise.all(ids.map(async itemID => {
+      const row = await this.app.search.result(await Zotero.Items.getAsync(itemID), spec);
+      if (withEvidence) row.evidence = this.app.search.metadataEvidence(this.app.search.metadataCache.get(itemID), itemID, evidenceSpec);
+      return row;
+    }));
+  }
+  moreItems() {
     const ids = this.pagedItemIDs;
-    if (!this.isOpen || !this.ready || this.composing || this.itemPaging || !ids || this.rows.length >= ids.length) return false;
-    const session = this.openRevision, revision = this.revision, offset = this.rows.length;
-    this.itemPaging = true;
-    try {
-      const next = ids.slice(offset, offset + this.app.prefs.get("limit"));
-      const spec = this.currentSpec, evidenceSpec = queryEvidenceSpec(spec), recent = !!this.recentItemIDs;
-      const rows = await Promise.all(next.map(async itemID => {
-        const row = await this.app.search.result(await Zotero.Items.getAsync(itemID), spec);
-        if (!recent) row.evidence = this.app.search.metadataEvidence(this.app.search.metadataCache.get(itemID), itemID, evidenceSpec);
-        return row;
-      }));
-      if (!this.isOpen || session !== this.openRevision || revision !== this.revision || ids !== this.pagedItemIDs) return false;
-      const previous = this.rows[this.selected], scroll = this.list.scrollTop;
+    if (!this.isOpen || !this.ready || this.composing || !ids || this.rows.length >= ids.length) return false;
+    if (this.itemPaging) return this.itemPaging;
+    const revision = this.revision, offset = this.rows.length;
+    const current = () => this.isOpen && revision === this.revision && ids === this.pagedItemIDs;
+    const page = this.itemPage(ids.slice(offset, offset + this.pageSize()), this.currentSpec, !this.recentItemIDs).then(rows => {
+      if (!current()) return false;
+      const previous = this.rows[this.selected];
+      this.pageStart = this.list.scrollTop || 0;
       this.rows.push(...rows); this.pickerVisible = this.rows.length;
-      this.renderRows(revision, previous, offset); this.select(this.selected, false, false); this.list.scrollTop = scroll;
+      this.renderRows(revision, previous, offset);
       this.message(`${this.countLabel} · ${ids.length}${ids.length > this.rows.length ? ` / ${this.rows.length}` : ""}`);
-      return true;
-    } catch (error) { if (this.isOpen && session === this.openRevision && revision === this.revision) this.message(error?.message || "检索失败", true); return false; }
-    finally { this.itemPaging = false; }
+      this.queueFill(); return true;
+    }).catch(error => { if (current()) this.message(error?.message || "检索失败", true); return false; })
+      .finally(() => { if (this.itemPaging === page) this.itemPaging = null; });
+    this.itemPaging = page; return page;
   }
   scrollResults(event) {
     if (!event.deltaY || event.ctrlKey || event.metaKey) return;
-    const hasMore = this.mode === "outline" ? this.outlineVisible < (this.outlineProgress?.rows.length || 0) : this.rows.length < (this.pagedItemIDs?.length || this.pickerRows?.length || 0);
-    if (this.list.scrollHeight <= this.list.clientHeight && !(hasMore && event.deltaY > 0)) return;
+    if (this.list.scrollHeight <= this.list.clientHeight && !(this.hasMoreRows() && event.deltaY > 0)) return;
     event.preventDefault(); event.stopPropagation();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? this.list.clientHeight : 1;
     this.list.scrollTop += event.deltaY * unit;
-    if (event.deltaY > 0 && this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight <= Math.max(120, this.list.clientHeight * .35)) this.more();
+    if (event.deltaY > 0) this.queueFill();
   }
   morePicker() {
     const all = this.pickerRows;
-    if (!this.isOpen || !this.ready || this.composing || !all || ![...pickers, "tabs"].includes(this.mode) || this.rows.length >= all.length) return false;
-    const previous = this.rows[this.selected], scroll = this.list.scrollTop, focused = this.doc.activeElement === this.rowNodes[this.selected], offset = this.rows.length;
-    this.pickerVisible = Math.min(all.length, this.rows.length + this.app.prefs.get("limit"));
-    this.rows = all.slice(0, this.pickerVisible); this.renderRows(this.revision, previous, this.mode === "directories" ? 0 : offset);
-    this.select(Math.max(0, this.rows.findIndex(row => sameResult(row, previous))), false, false); this.list.scrollTop = scroll;
-    if (focused) this.rowNodes[this.selected]?.focus();
+    if (!this.isOpen || !this.ready || this.composing || !all || this.mode === "items" || this.rows.length >= all.length) return false;
+    const previous = this.rows[this.selected], offset = this.rows.length;
+    this.pageStart = this.list.scrollTop || 0;
+    this.pickerVisible = Math.min(all.length, offset + this.pageSize());
+    this.rows.push(...all.slice(offset, this.pickerVisible)); this.renderRows(this.revision, previous, offset);
     this.message(`${this.countLabel} · ${all.length}${all.length > this.rows.length ? ` / ${this.rows.length}` : ""}`);
-    return true;
+    this.queueFill(); return true;
   }
   moreOutline() {
     const progress = this.outlineProgress;
     if (!this.isOpen || !this.ready || this.composing || this.mode !== "outline" || !progress?.rows || this.outlinePaging) return false;
-    const visible = this.outlineVisible || this.app.prefs.get("limit");
+    const visible = this.outlineVisible;
     if (visible >= progress.rows.length) return false;
     this.outlinePaging = true;
     try {
       const previous = this.rows[this.selected], scroll = this.list.scrollTop, focused = this.doc.activeElement === this.rowNodes[this.selected];
-      this.outlineVisible = Math.min(progress.rows.length, visible + this.app.prefs.get("limit"));
+      this.pageStart = scroll || 0;
+      this.outlineVisible = Math.min(progress.rows.length, visible + this.pageSize());
       this.outlineTree = buildOutlineTree(progress.rows.slice(0, this.outlineVisible), { allRows: progress.allRows, groupDocuments: this.outlineContext.type !== "pdf" });
       this.renderOutlineRows(this.revision, previous, true); this.list.scrollTop = scroll;
       if (focused) this.rowNodes[this.selected]?.focus();
       this.outlineResultSignature = JSON.stringify([this.resultSignature, outlineState(this.outlineTree)]);
-      this.updateOutlineStatus(); return true;
+      this.updateOutlineStatus(); this.queueFill(); return true;
     } finally { this.outlinePaging = false; }
-  }
-  fillOutlineViewport() {
-    if (this.mode !== "outline") return;
-    while (this.list.clientHeight > 0 && this.list.scrollHeight <= this.list.clientHeight && this.moreOutline()) {}
   }
   updateOutlineStatus() {
     if (!this.outlineProgress) return;
@@ -1134,10 +1189,11 @@ export class Launcher {
   }
   canCopy() { return this.switchMode === "tabs" || !this.switchMode && this.mode === "items"; }
   canSelectMany() { return !this.collectionPicker && this.switchMode !== "commands" && (this.canCopy() || ["outline", "directories"].includes(this.switchMode)); }
-  updateSelection() {
+  updateSelection(from = 0) {
     const picked = this.picked?.size || 0;
     this.list?.setAttribute("aria-multiselectable", String(this.canSelectMany()));
-    for (const [index, node] of (this.rowNodes || []).entries()) {
+    for (let index = from; index < (this.rowNodes?.length || 0); index++) {
+      const node = this.rowNodes[index];
       const chosen = this.rows[index] && this.picked?.has(selectionKey(this.rows[index]));
       node?.setAttribute("aria-selected", String(picked ? !!chosen : index === this.selected));
       node?.setAttribute("data-qs-picked", String(!!chosen));
@@ -1172,7 +1228,7 @@ export class Launcher {
     this.selectionRevision = (this.selectionRevision || 0) + 1;
     this.picked ||= new Map(); const row = this.rows[index], key = selectionKey(row);
     if (this.picked.has(key)) this.picked.delete(key); else this.picked.set(key, row);
-    this.selectionAnchor = index; this.select(index, false);
+    this.selectionAnchor = index; this.select(index, false, true, 0);
   }
   selectRange(index) {
     if (!this.canSelectMany()) return;
@@ -1183,7 +1239,7 @@ export class Launcher {
     for (let cursor = Math.min(anchor, index); cursor <= Math.max(anchor, index); cursor++) {
       const row = this.rows[cursor]; if (row && !row.contextOnly) this.picked.set(selectionKey(row), row);
     }
-    this.select(index);
+    this.select(index, true, true, 0);
   }
   selectAllResults() {
     if (!this.ready || !this.canSelectMany()) return;
@@ -1248,7 +1304,7 @@ export class Launcher {
     return new Promise(resolve => {
       this.win.clearTimeout(this.feedbackTimer); if (this.feedback) this.feedback.hidden = true; if (this.tooltip) this.tooltip.hidden = true;
       const state = Object.fromEntries(["switchMode", "inputMode", "mode", "context", "rows", "rowNodes", "selected", "ready", "itemIDs", "recentItemIDs", "pagedItemIDs",
-        "picked", "selectionAnchor", "selectionRevision", "filterBindings", "currentSpec", "resultSignature", "pickerRows", "pickerSignature", "pickerVisible", "pickerSize",
+        "picked", "selectionAnchor", "selectionRevision", "filterBindings", "currentSpec", "resultSignature", "pickerRows", "pickerSignature", "pickerVisible", "pickerSize", "pageStart",
         "directoryStart", "advancedSpec", "nativeConditions"].map(key => [key, this[key]]));
       this.collectionPicker = { libraryID, resolve, state, value: this.input.value, caret: [this.input.selectionStart, this.input.selectionEnd],
         scopes: this.inputScopes.records, preview: !this.preview.hidden, advancedHidden: this.advanced.hidden, sourcesHidden: this.sources.hidden,
@@ -1259,16 +1315,16 @@ export class Launcher {
       this.selected = 0; this.selectionAnchor = null; this.ready = false; this.resultSignature = null;
       this.advancedSpec = this.nativeConditions = null; this.advanced.hidden = this.sources.hidden = true; this.stopAdvancedHeight();
       this.directoryStart = this.app.directoryStart(this.win); this.directoryStart?.catch(error => this.app.logError(error));
-      this.list.replaceChildren(); this.preview.replaceChildren(); this.disposePDF(); this.togglePreview(true);
+      this.list.replaceChildren(); this.clearPreview(); this.togglePreview(true);
       this.input.focus(); this.schedule(0);
     });
   }
   finishCollectionPicker(target, refresh = true) {
     const picker = this.collectionPicker; if (!picker) return false;
-    this.collectionPicker = null; this.disposePDF(); Object.assign(this, picker.state);
+    this.collectionPicker = null; this.clearPreview(); Object.assign(this, picker.state);
     this.input.value = picker.value; this.inputScopes.reset(picker.value, picker.scopes); this.input.setSelectionRange(...picker.caret);
     this.input.readOnly = picker.readOnly; this.advanced.hidden = picker.advancedHidden; this.sources.hidden = picker.sourcesHidden;
-    this.list.replaceChildren(...this.rowNodes); this.list.scrollTop = picker.scroll; this.preview.replaceChildren(); this.preview.hidden = !picker.preview;
+    this.list.replaceChildren(...this.rowNodes); this.list.scrollTop = picker.scroll; this.preview.hidden = !picker.preview;
     if (refresh && this.isOpen) {
       this.togglePreview(picker.preview); if (!this.advanced.hidden) this.watchAdvancedHeight();
       this.input.focus(); this.schedule(0);
@@ -1319,21 +1375,50 @@ export class Launcher {
     } finally { this.actionRunning = false; this.allowOutsideFocus = false; }
   }
   navigationIndex(offset) {
+    if (this.mode !== "outline") return Math.max(0, Math.min(this.rows.length - 1, this.selected + offset));
     const indices = this.rows.map((row, index) => row.contextOnly ? -1 : index).filter(index => index >= 0);
     const current = Math.max(0, indices.indexOf(this.selected));
     return indices[Math.max(0, Math.min(indices.length - 1, current + offset))] ?? 0;
   }
-  select(index, scroll = true, preview = true) {
+  async navigate(offset, extend, keep) {
+    if (!this.ready || !this.rows.length) return;
+    const revision = this.revision, row = this.rows[this.selected];
+    const move = this.navigationRevision = (this.navigationRevision || 0) + 1;
+    if (offset > 0 && this.hasMoreRows() && this.navigationIndex(offset) === this.navigationIndex(offset - 1)) {
+      const page = this.more();
+      if (page?.then) await page;
+      if (!this.isOpen || revision !== this.revision || move !== this.navigationRevision || !sameResult(this.rows[this.selected], row)) return;
+    }
+    const next = this.navigationIndex(offset);
+    if (extend && this.canSelectMany()) this.selectRange(next);
+    else {
+      if (!keep) { if (this.picked?.size) this.clearSelection(); this.selectionAnchor = next; }
+      if (next !== this.selected) this.select(next);
+    }
+  }
+  select(index, scroll = true, preview = true, refreshFrom) {
     if (!this.rows.length) return;
     index = Math.max(0, Math.min(index, this.rows.length - 1));
     if (this.rows[index].contextOnly) return;
-    this.selected = index;
-    this.updateSelection();
+    const previous = this.selected; this.selected = index;
+    if (refreshFrom !== undefined) this.updateSelection(refreshFrom);
+    else if (previous !== index) {
+      for (const cursor of [previous, index]) {
+        const node = this.rowNodes?.[cursor];
+        node?.setAttribute("data-qs-current", String(cursor === index));
+        if (!this.picked?.size) node?.setAttribute("aria-selected", String(cursor === index));
+      }
+    }
     this.input.setAttribute("aria-activedescendant", `qs-option-${this.selected}`);
     if (scroll) {
-      const node = this.rowNodes[this.selected];
-      if (this.mode === "outline") scrollOutlineRow(this.list, node?.querySelector?.(":scope > .qs-outline-result") || node);
-      else node?.scrollIntoView({ block: "nearest" });
+      const node = this.rowElement();
+      if (this.mode === "outline") scrollOutlineRow(this.list, node);
+      else if (node && this.list.clientHeight) {
+        const top = this.list.getBoundingClientRect().top + (this.list.clientTop || 0), bounds = node.getBoundingClientRect();
+        if (bounds.top < top) this.list.scrollTop += bounds.top - top;
+        else if (bounds.bottom > top + this.list.clientHeight) this.list.scrollTop += Math.min(bounds.top - top, bounds.bottom - top - this.list.clientHeight);
+      }
+      this.queueFill();
     }
     if (preview && !this.preview.hidden) this.updatePreview(this.revision).catch(error => { if (this.isOpen) this.message(error?.message || "预览暂不可用", true); });
   }
@@ -1426,41 +1511,104 @@ export class Launcher {
     this.preview.hidden = typeof force === "boolean" ? !force : !this.preview.hidden;
     this.body.classList.toggle("with-preview", !this.preview.hidden); this.dialog.classList.toggle("with-preview", !this.preview.hidden);
     this.previewButton.setAttribute("aria-expanded", String(!this.preview.hidden));
-    if (!this.preview.hidden) this.updatePreview(this.revision); else this.disposePDF();
+    if (!this.preview.hidden) this.updatePreview(this.revision);
+    else { this.cancelPickerPreview(); this.previewRevision = (this.previewRevision || 0) + 1; this.disposePDF(); }
     this.resizeToContent();
-    this.fillOutlineViewport();
+    this.queueFill();
   }
   disposePDF() {
     this.pdfPreview?.destroy(); this.pdfPreview = null; this.pdfPreviewKey = null; this.pdfPreviewSource = null;
+  }
+  clearPreview() { this.cancelPickerPreview(); this.disposePDF(); this.preview.replaceChildren(); }
+  cancelPickerPreview() {
+    if (this.previewTimer != null) this.win.clearTimeout(this.previewTimer);
+    this.previewPage?.stage?.remove();
+    this.previewTimer = this.previewPage = null;
+    if (this.preview) { this.preview.inert = false; this.preview.removeAttribute?.("aria-busy"); }
+  }
+  previewCurrent(page) {
+    return this.previewPage === page && this.isOpen && !this.preview.hidden && this.revision === page.revision && sameResult(this.rows[this.selected], page.row);
+  }
+  async appendPreviewItems(page, items) {
+    const doc = this.doc;
+    const locations = page.facet ? await Promise.all(items.map(item => this.app.locations.get(item.itemID).catch(() => ({ status: "error" })))) : [];
+    if (!this.previewCurrent(page)) return false;
+    page.start = page.ready ? this.preview.scrollTop : 0;
+    for (const [index, item] of items.entries()) {
+      const path = page.facet ? h(doc, "div", { class: "qs-preview-locations" }) : null;
+      if (path) this.renderLocations(path, item, locations[index], page.spec);
+      page.list.append(h(doc, "div", { class: "qs-directory-preview-item" }, [h(doc, "div", { class: "qs-result-title" }, [itemTypeIcon(doc, item.itemIconType || item.itemType, this.root.dataset.theme), h(doc, "span", { class: "qs-title-text", text: item.title })]), h(doc, "p", { class: "qs-muted", text: [item.authors, item.year].filter(Boolean).join(" · ") }), this.sourceNodes(item), path]));
+    }
+    page.loaded += items.length;
+    page.count.textContent = t("{count} 条", { count: page.total }) + (page.loaded < page.total ? ` / ${page.loaded}` : "");
+    return true;
+  }
+  async appendNextPreview(page) {
+    const size = screenRows(this.preview, page.list.lastElementChild);
+    const items = await this.itemPage(page.ids.slice(page.loaded, page.loaded + size), { text: "" });
+    return this.previewCurrent(page) && this.appendPreviewItems(page, items);
+  }
+  async morePreview() {
+    const page = this.previewPage;
+    if (!page?.ready || page.loading || page.loaded >= page.ids.length || !this.previewCurrent(page)) return;
+    page.loading = true;
+    try {
+      if (await this.appendNextPreview(page)) this.queueFill();
+    } catch (error) { if (this.previewCurrent(page)) this.message(error.message || "预览暂不可用", true); }
+    finally { page.loading = false; }
+  }
+  async loadPickerPreview(page) {
+    if (!this.previewCurrent(page)) return;
+    const { row, spec, facet } = page, doc = this.doc;
+    try {
+      const limit = screenRows(this.preview, this.preview.querySelector(".qs-directory-preview-item"));
+      const result = await (facet ? this.app.search.search(this.app.makeSpec(this.win, { text: "", scope: spec.scope, filters: [{ type: row.kind, value: row.title,
+        ref: row.kind === "author" ? { kind: "author", key: row.key } : { kind: row.kind, key: row.key, field: row.field, title: row.title } }] }), { limit }) : this.app.directoryItems(row, limit));
+      if (!this.previewCurrent(page)) return;
+      page.ids = result.itemIDs; page.total = result.total; page.loaded = 0;
+      page.list = h(doc, "div", { class: "qs-directory-preview" }); page.count = h(doc, "p", { class: "qs-muted" });
+      if (!await this.appendPreviewItems(page, result.results) || !this.previewCurrent(page)) return;
+      const detail = !facet ? "" : row.kind === "author" ? row.authors : row.field === "publicationTitle" ? "Publication" : row.field === "publisher" ? "Publisher" : t(filterTypes[row.kind].name);
+      const mark = facet ? row.kind === "type" ? itemTypeIcon(doc, row.key, this.root?.dataset.theme) || icon(doc, "types") : icon(doc, row.field === "publisher" ? "publisher" : filterTypes[row.kind].icon)
+        : icon(doc, row.kind === "library" ? "library" : ["feed", "feeds"].includes(row.kind) ? "rss" : row.kind === "search" ? "save" : "folder");
+      const heading = h(doc, "h3", { class: "qs-preview-title" }, [mark, h(doc, "span", { class: "qs-title-text", text: row.title })]);
+      const content = [heading];
+      if (detail && detail !== row.title) content.push(h(doc, "p", { class: "qs-muted", text: detail }));
+      content.push(page.count, page.list);
+      if (page.loaded < page.ids.length) {
+        page.stage = h(doc, "div", { class: "qs-preview-stage", "aria-hidden": "true" }, content);
+        this.preview.append(page.stage);
+        while (page.loaded < page.ids.length && page.stage.scrollHeight < this.preview.clientHeight) {
+          if (!await this.appendNextPreview(page) || !this.previewCurrent(page)) return;
+        }
+      }
+      this.disposePDF(); this.preview.replaceChildren(...content);
+      this.preview.scrollTop = 0; page.ready = true; this.queueFill();
+    } catch (error) {
+      if (this.previewCurrent(page)) { this.disposePDF(); this.preview.replaceChildren(h(doc, "h3", { text: row.title }), h(doc, "p", { text: error.message || t("预览暂不可用") })); }
+    } finally {
+      page.stage?.remove(); page.stage = null;
+      if (this.previewCurrent(page)) { this.preview.inert = false; this.preview.removeAttribute("aria-busy"); }
+    }
   }
   async updatePreview(revision) {
     if (this.preview.hidden || !this.rows[this.selected]) return;
     const index = this.selected, row = this.rows[index], doc = this.doc, spec = this.currentSpec;
     const request = this.previewRevision = (this.previewRevision || 0) + 1;
     if (pickers.includes(this.mode)) {
-      const facet = ["author", "year", "venue", "type"].includes(row.kind);
-      const detail = !facet ? "" : row.kind === "author" ? row.authors : row.field === "publicationTitle" ? "Publication" : row.field === "publisher" ? "Publisher" : t(filterTypes[row.kind].name);
-      const mark = facet ? row.kind === "type" ? itemTypeIcon(doc, row.key, this.root?.dataset.theme) || icon(doc, "types") : icon(doc, row.field === "publisher" ? "publisher" : filterTypes[row.kind].icon)
-        : icon(doc, row.kind === "library" ? "library" : ["feed", "feeds"].includes(row.kind) ? "rss" : row.kind === "search" ? "save" : "folder");
-      this.disposePDF(); this.preview.replaceChildren(h(doc, "h3", { class: "qs-preview-title" }, [mark, h(doc, "span", { class: "qs-title-text", text: row.title })]));
-      if (detail && detail !== row.title) this.preview.append(h(doc, "p", { class: "qs-muted", text: detail }));
-      const list = h(doc, "div", { class: "qs-directory-preview", text: t("正在读取条目…") }); this.preview.append(list);
-      try {
-        const limit = this.app.prefs.get("limit");
-        const result = await (facet ? this.app.search.search(this.app.makeSpec(this.win, { text: "", scope: spec.scope, filters: [{ type: row.kind, value: row.title,
-          ref: row.kind === "author" ? { kind: "author", key: row.key } : { kind: row.kind, key: row.key, field: row.field, title: row.title } }] }), { limit }) : this.app.directoryItems(row, limit));
-        if (revision !== this.revision || index !== this.selected || request !== this.previewRevision || !this.isOpen) return;
-        list.replaceChildren(h(doc, "p", { class: "qs-muted", text: t("{count} 条", { count: result.total }) + (result.total > result.results.length ? ` / ${result.results.length}` : "") }));
-        const locations = facet ? await Promise.all(result.results.map(item => this.app.locations.get(item.itemID))) : [];
-        if (revision !== this.revision || index !== this.selected || request !== this.previewRevision || !this.isOpen) return;
-        for (const [index, item] of result.results.entries()) {
-          const path = facet ? h(doc, "div", { class: "qs-preview-locations" }) : null;
-          if (path) this.renderLocations(path, item, locations[index], spec);
-          list.append(h(doc, "div", { class: "qs-directory-preview-item" }, [h(doc, "div", { class: "qs-result-title" }, [itemTypeIcon(doc, item.itemIconType || item.itemType, this.root.dataset.theme), h(doc, "span", { class: "qs-title-text", text: item.title })]), h(doc, "p", { class: "qs-muted", text: [item.authors, item.year].filter(Boolean).join(" · ") }), this.sourceNodes(item), path]));
-        }
-      } catch (error) { if (revision === this.revision && request === this.previewRevision) list.textContent = error.message; }
-      this.resizeToContent(); return;
+      if (this.previewPage && this.previewCurrent(this.previewPage)) return;
+      this.cancelPickerPreview();
+      const page = this.previewPage = { revision, row, spec, facet: this.mode !== "directories" };
+      this.preview.inert = true; this.preview.setAttribute("aria-busy", "true");
+      if (this.preview.firstChild) {
+        this.previewTimer = this.win.setTimeout(() => { this.previewTimer = null; this.loadPickerPreview(page); }, 70);
+      } else {
+        this.preview.append(h(doc, "p", { class: "qs-muted", l10n: { text: "正在读取条目…" } }));
+        await this.loadPickerPreview(page);
+      }
+      return;
     }
+    if (this.previewPage) this.cancelPickerPreview();
     const headingText = h(doc, "span", { class: "qs-title-text" });
     const query = this.query(), outlineText = query.scopedOutline ? query.activeFilter?.quoted ? JSON.stringify(query.activeFilter.value) : query.activeFilter?.value || "" : query.text;
     appendMarked(headingText, plainText(row.title), this.mode === "outline" ? (this.switchMode ? switchTerms(outlineText) : tokenize(outlineText)).flatMap(term => matchRanges(plainText(row.title), term)) : []);
@@ -1704,18 +1852,10 @@ export class Launcher {
     if (event.target.closest?.(".qs-advanced")) return;
     if (event.target !== this.input && (event.target.closest?.("button") || !event.target.closest?.(".qs-result-main,.qs-outline-branch"))) return;
     if (event.key === "Backspace" && event.target === this.input && !this.switchMode && this.inputMode === "tabs" && !this.input.value) { event.preventDefault(); this.setMode("items"); }
-    else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    else if (["ArrowDown", "ArrowUp", "PageDown", "PageUp"].includes(event.key)) {
       event.preventDefault();
-      if (event.key === "ArrowDown" && this.selected === this.rows.length - 1) this.more();
-      const next = this.navigationIndex(event.key === "ArrowDown" ? 1 : -1);
-      if (event.shiftKey && this.canSelectMany()) this.selectRange(next);
-      else { if (!accel) { this.clearSelection(); this.selectionAnchor = next; } this.select(next); }
-    }
-    else if (this.mode === "outline" && ["PageDown", "PageUp"].includes(event.key)) {
-      event.preventDefault();
-      const node = this.rowNodes[this.selected]?.querySelector?.(":scope > .qs-outline-result"), step = Math.max(1, Math.floor(this.list.clientHeight / (node?.getBoundingClientRect().height || 32)));
-      if (event.key === "PageDown" && this.navigationIndex(step) === this.rows.length - 1) this.moreOutline();
-      this.select(this.navigationIndex(event.key === "PageDown" ? step : -step));
+      const step = event.key.startsWith("Page") ? this.pageSize() : 1;
+      return this.navigate(event.key.endsWith("Down") ? step : -step, event.shiftKey, accel);
     }
     else if (event.key === "Enter") {
       event.preventDefault();

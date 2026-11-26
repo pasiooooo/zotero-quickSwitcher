@@ -6,7 +6,7 @@ import { profileJSONStore } from "./layout.mjs";
 
 export const MAX_CONFIG_BYTES = 256 * 1024;
 function mergeRecords(...maps) {
-  const merged = {};
+  const merged = {}; let needsTag = false;
   for (const records of maps) {
     if (!records || typeof records !== "object" || Array.isArray(records)) throw new Error(t("同步配置记录无效"));
     for (const [group, record] of Object.entries(records)) {
@@ -17,10 +17,13 @@ function mergeRecords(...maps) {
       if (!["prefixes", "shortcuts"].includes(group) && (Object.keys(record.values).length !== names.length || names.some(name => !Object.hasOwn(record.values, name)))) throw new Error(t("同步配置记录无效"));
       const values = ["prefixes", "shortcuts"].includes(group) ? migrateInputGroup(group, record.values) : Object.fromEntries(names.map(name => [name, validatePreference(name, record.values[name], ["width", "height"].includes(name))]));
       if (Object.keys(values).length !== names.length || names.some(name => !Object.hasOwn(values, name))) throw new Error(t("同步配置记录无效"));
-      if (!merged[group] || compareVersions(record.version, merged[group].version) > 0) merged[group] = { values, version: { clock: record.version.clock, deviceID: record.version.deviceID } };
+      if (!merged[group] || compareVersions(record.version, merged[group].version) > 0) {
+        merged[group] = { values, version: { clock: record.version.clock, deviceID: record.version.deviceID } };
+        if (group === "prefixes") needsTag = !Object.hasOwn(record.values, "tagPrefix");
+      }
     }
   }
-  if (merged.prefixes && merged.shortcuts) merged.prefixes.values = linkModePrefixes(merged.prefixes.values, merged.shortcuts.values, true);
+  if (merged.prefixes && merged.shortcuts) merged.prefixes.values = linkModePrefixes(merged.prefixes.values, merged.shortcuts.values, true, needsTag);
   return merged;
 }
 export function parseConfig(text) {

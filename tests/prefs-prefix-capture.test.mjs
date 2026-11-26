@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { preferenceFixture } from "./fixtures/preferences.mjs";
 
 test("all prefix controls use click capture and save the produced punctuation rather than a shortcut", t => {
-  const f = preferenceFixture(t), names = ["author", "directory", "year", "venue", "type", "current", "outline", "fulltext", "tabs"];
+  const f = preferenceFixture(t), names = ["author", "tag", "directory", "year", "venue", "type", "current", "outline", "fulltext", "tabs"];
   assert.ok(names.every(name => f.field(name + "Prefix").hasAttribute("readonly")));
   const input = f.field("authorPrefix");
   f.fire(input, "focus");

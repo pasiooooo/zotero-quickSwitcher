@@ -1,6 +1,6 @@
 {
   "name": "zotero-quickswitcher",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "private": true,
   "type": "module",
   "description": "A keyboard launcher for searching a Zotero library, switching PDF tabs and jumping to collections.",

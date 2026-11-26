@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-export const DEFAULT_PREFIXES = Object.freeze({ author: "@", directory: "/", year: ":", venue: "!", type: "%", current: ">", outline: "'", fulltext: " ", tabs: ";" });
-export const PRIOR_PREFIXES = Object.freeze({ ...DEFAULT_PREFIXES, directory: "#", tabs: "\t" });
+export const PRE_TAG_PREFIXES = Object.freeze({ author: "@", directory: "/", year: ":", venue: "!", type: "%", current: ">", outline: "'", fulltext: " ", tabs: ";" });
+export const DEFAULT_PREFIXES = Object.freeze({ ...PRE_TAG_PREFIXES, tag: "#" });
+export const PRIOR_PREFIXES = Object.freeze({ ...PRE_TAG_PREFIXES, directory: "#", tabs: "\t" });
 export const LEGACY_PREFIXES = Object.freeze(Object.fromEntries(Object.entries(PRIOR_PREFIXES).filter(([type]) => type !== "outline").map(([type, value]) => [type, type === "current" ? "'" : value])));
 export function parseSwitchInput(value, mode) { return { mode, kind: "switch", text: String(value) }; }
 export function availablePrefix(preferred, used) {
   return [preferred, "›", "`", "~", "^", "&", ";", "=", "§", ",", "|", "+", "."].find(marker => !used.includes(marker));
 }
-const modes = { author: "authors", directory: "directories", year: "years", venue: "venues", type: "types", outline: "outline", tabs: "tabs" };
+const modes = { author: "authors", directory: "directories", year: "years", venue: "venues", type: "types", tag: "tags", outline: "outline", tabs: "tabs" };
 function escapeAt(value, index, prefixes) {
   const char = value[index + 1];
   return value[index] === "\\" && (/[\\"()]/.test(char || "") || Object.values(DEFAULT_PREFIXES).includes(char)
@@ -32,9 +33,9 @@ function hasUnescapedGuide(value, prefixes) {
   return false;
 }
 function syntax(prefixes) {
-  const result = { ...DEFAULT_PREFIXES, ...prefixes };
+  const result = { ...PRE_TAG_PREFIXES, ...prefixes };
   if (!Object.hasOwn(prefixes, "outline")) result.outline = availablePrefix(DEFAULT_PREFIXES.outline, Object.entries(result).filter(([type]) => type !== "outline").map(([, value]) => value));
-  return Object.values(result).some(value => typeof value !== "string" || value.length !== 1) || new Set(Object.values(result)).size !== Object.keys(DEFAULT_PREFIXES).length ? DEFAULT_PREFIXES : result;
+  return Object.values(result).some(value => typeof value !== "string" || value.length !== 1) || new Set(Object.values(result)).size !== Object.keys(result).length ? DEFAULT_PREFIXES : result;
 }
 function followsClosingGroup(value, index) {
   if (value[index - 1] !== ")") return false;
@@ -44,6 +45,7 @@ function followsClosingGroup(value, index) {
 }
 function markerType(value, index, prefixes) {
   const char = value[index];
+  if (!char) return undefined;
   const type = Object.keys(modes).find(type => prefixes[type] === char);
   if (type && /[\p{L}\p{N}]/u.test(char)) return value[index + 1] === "(" ? type : undefined;
   if (type === "author" || type === "directory" && char !== "/") return type;
@@ -356,12 +358,15 @@ export function migrateLauncherPrefixes(value, before, after) {
   else if (query.kind === "outline" && value.startsWith(before.outline)) replacements.push([0, after.outline]);
   else if (value.startsWith(before.tabs)) replacements.push([0, after.tabs]);
   else if (value.startsWith(before.fulltext)) replacements.push([0, after.fulltext]);
+  const newTag = !before.tag && !Object.values(before).includes(after.tag) && after.tag;
+  let quoted = false;
   for (let index = 0; index < value.length; index++) {
     const escaped = escapeAt(value, index, before);
     if (escaped !== null) {
       if (escapeAt("\\" + escaped, 0, after) === null) replacements.push([index, ""]);
       index++;
-    }
+    } else if (value[index] === '"') quoted = !quoted;
+    else if (!quoted && value[index] === newTag && markerType(value, index, after) === "tag") replacements.push([index, "\\" + newTag]);
   }
   for (const [index, marker] of replacements.sort((a, b) => b[0] - a[0])) value = value.slice(0, index) + marker + value.slice(index + 1);
   return value;

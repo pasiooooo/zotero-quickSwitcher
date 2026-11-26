@@ -70,7 +70,7 @@ test("all shortcut updates validate together before writing and reset handles sw
 test("mode keys and prefixes update atomically in both directions, and invalid combinations leave all settings intact", () => {
   const values = storage(), prefs = new Prefs();
   try {
-    prefs.set("directoryPrefix", "#"); assert.equal(prefs.get("directoryShortcut"), "Alt+#");
+    prefs.set("tagPrefix", "~"); prefs.set("directoryPrefix", "#"); assert.equal(prefs.get("directoryShortcut"), "Alt+#");
     prefs.set("outlineShortcut", "Ctrl+`"); assert.equal(prefs.get("outlinePrefix"), "`");
     prefs.set("outlinePrefix", "$"); assert.equal(prefs.get("outlineShortcut"), "Control+$");
     prefs.set("outlinePrefix", "`"); assert.equal(prefs.get("outlineShortcut"), "Control+`");

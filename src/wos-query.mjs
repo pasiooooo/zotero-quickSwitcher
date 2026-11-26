@@ -13,6 +13,7 @@ function filterNode(filter, resolved) {
   if (filter.type === "tabs") return clause("ZOTERO_TABS", [title || t("已打开标签页")], { local: true, filter, negated: filter.negated });
   if (filter.type === "directory") return clause("ZOTERO_DIR", [title], { local: true, filter, negated: filter.negated });
   if (filter.type === "type") return clause("ZOTERO_TYPE", [title], { local: true, filter, negated: filter.negated });
+  if (filter.type === "tag") return clause("ZOTERO_TAG", [title], { local: true, filter, negated: filter.negated });
   if (filter.type === "year") {
     const years = /^\d{4}$/u.test(title) ? [title] : unique(matches.map(match => match.value).filter(value => /^\d{4}$/u.test(value)));
     return clause("PY", years.length ? years : [title], { valid: !!years.length, filter, negated: filter.negated });

@@ -57,14 +57,17 @@ export class LayoutStore {
     this.work = this.work.catch(() => {}).then(operation); return this.work;
   }
   place(libraryKey, searchKey, placement) {
+    return this.placeMany(libraryKey, [[searchKey, placement]]).then(records => records[0]);
+  }
+  placeMany(libraryKey, placements) {
     return this.transact(async () => {
       const clock = this.clock + 1;
-      const record = { libraryKey, searchKey, placement, version: { clock, deviceID: this.deviceID } };
-      if (!validateLayoutRecord(record)) throw new Error(t("搜索位置或逻辑版本无效"));
-      const records = { ...this.records, [`${libraryKey}:${searchKey}`]: structuredClone(record) };
+      const changes = placements.map(([searchKey, placement]) => ({ libraryKey, searchKey, placement, version: { clock, deviceID: this.deviceID } }));
+      if (!changes.every(validateLayoutRecord)) throw new Error(t("搜索位置或逻辑版本无效"));
+      const records = { ...this.records, ...Object.fromEntries(changes.map(record => [`${libraryKey}:${record.searchKey}`, structuredClone(record)])) };
       await this.io.write(JSON.stringify({ ...this.snapshot(), records, clock, dirty: true }));
       this.records = records; this.clock = clock; this.dirty = true; this.prefs.set("clock", clock); this.onChange();
-      return record;
+      return changes;
     });
   }
   saveQuery(libraryKey, searchKey, spec) {
