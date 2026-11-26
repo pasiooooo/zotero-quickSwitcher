@@ -16,6 +16,9 @@ const expectedFeed = `${repository.replace("https://github.com/", "https://raw.g
 if (manifest.version !== pkg.version || compatibility.update_url !== expectedFeed) {
   throw new Error("The install manifest must match the package version and public update feed.");
 }
+if (!pkg.author || manifest.author !== pkg.author || manifest.homepage_url !== repository) {
+  throw new Error("The install manifest must match the package author and link to its repository.");
+}
 
 const { outputFiles } = await build({ absWorkingDir: root, entryPoints: ["src/index.mjs"], bundle: true,
   write: false, format: "iife", globalName: "QuickSwitcher", target: "firefox128", legalComments: "eof" });

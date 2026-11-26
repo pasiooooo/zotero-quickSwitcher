@@ -10,6 +10,7 @@ files = ("bootstrap.js", "manifest.json", "content/THIRD-PARTY-LICENSES.txt", "c
          "content/pdf-preview.html", "content/pdf-preview.js", "content/preferences.js", "content/preferences.xhtml",
          "content/style.css", "content/zotero-command.svg")
 entries = {name: (source / name).read_bytes() for name in files}
+entries["LICENSE"] = (Path(__file__).resolve().parents[1] / "LICENSE").read_bytes()
 entries["content/quickswitcher.js"] = sys.stdin.buffer.read()
 if not entries["content/quickswitcher.js"]:
     raise SystemExit("Missing compiled launcher")

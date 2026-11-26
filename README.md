@@ -36,6 +36,8 @@ Zotero Quick Switcher 是 Zotero 10 的键盘启动器。在同一个面板里�
 2. 在 Zotero 打开「工具 → 插件」，点击齿轮，选择「从文件安装插件」，选中下载的 `.xpi`。
 3. 按 `Alt+O` 打开检索。在 Zotero 设置的 **Zotero Quick Switcher** 中可以修改快捷键、检索范围和外观。
 
+安装后，Zotero 会从[本仓库的更新清单][updates]检查新版本。要手动检查，可在「工具 → 插件」的齿轮菜单中选择「检查更新」。
+
 <a id="start-zh"></a>
 
 ### 快速上手
@@ -204,7 +206,7 @@ PDF 预览、大纲和文件复制都需要本机可读的附件；全文检索�
 
 ### 许可
 
-项目采用 [AGPL-3.0-or-later][license]。离线拼音库 `pinyin-pro` 的 [MIT 许可][third-party] 随插件分发。
+项目采用 [AGPL-3.0-or-later][license]。安装包内附完整许可证，以及 [Zotero 的署名和商标声明、拼音库 `pinyin-pro` 的 MIT 许可][third-party]。
 
 <a id="readme-en"></a>
 
@@ -239,6 +241,8 @@ Requires **Zotero 10.0.7 or a later 10.x release**.
 1. Download the `.xpi` file from [Releases][releases]. You don’t need the source ZIP to install the plugin.
 2. In Zotero, open **Tools → Plugins**, click the gear, choose **Install Plugin From File**, and select the `.xpi`.
 3. Press `Alt+O` to open search. To change the shortcuts, search scope or appearance, open **Zotero Quick Switcher** in Zotero’s settings.
+
+Zotero checks this repository’s [update feed][updates] for new versions. To check manually, open **Tools → Plugins** and choose **Check for Updates** from the gear menu.
 
 <a id="start-en"></a>
 
@@ -408,9 +412,10 @@ The global shortcut is available only on Windows and macOS and may conflict with
 
 ### License
 
-Licensed under [AGPL-3.0-or-later][license]. The plugin includes the [MIT license][third-party] for `pinyin-pro`, its offline pinyin library.
+Licensed under [AGPL-3.0-or-later][license]. The XPI includes the full license, along with [Zotero’s copyright and trademark notices and the MIT license for `pinyin-pro`][third-party].
 
 [releases]: https://github.com/pasiooooo/zotero-quickSwitcher/releases/latest
+[updates]: https://raw.githubusercontent.com/pasiooooo/zotero-quickSwitcher/main/updates.json
 [issues]: https://github.com/pasiooooo/zotero-quickSwitcher/issues
 [license]: LICENSE
 [third-party]: addon/content/THIRD-PARTY-LICENSES.txt

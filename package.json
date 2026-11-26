@@ -1,9 +1,10 @@
 {
   "name": "zotero-quickswitcher",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "type": "module",
   "description": "A keyboard launcher for searching a Zotero library, switching PDF tabs and jumping to collections.",
+  "author": "pasiooooo",
   "repository": { "type": "git", "url": "https://github.com/pasiooooo/zotero-quickSwitcher.git" },
   "keywords": ["zotero", "zotero-plugin", "zotero-addon", "reference-manager", "keyboard-shortcuts", "command-palette", "literature-search", "pdf-reader"],
   "engines": { "node": ">=22.12" },

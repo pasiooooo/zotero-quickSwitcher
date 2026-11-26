@@ -1,9 +1,10 @@
 {
   "manifest_version": 2,
   "name": "Zotero Quick Switcher",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "文献快切、检索高亮、文件夹位置与保存搜索组织",
-  "author": "Zotero Quick Switcher contributors",
+  "author": "pasiooooo",
+  "homepage_url": "https://github.com/pasiooooo/zotero-quickSwitcher",
   "icons": { "48": "content/icon.svg", "96": "content/icon.svg" },
   "applications": {
     "zotero": {
